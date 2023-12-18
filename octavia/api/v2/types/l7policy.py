@@ -72,6 +72,10 @@ class L7PolicyRootResponse(types.BaseType):
     l7policy = wtypes.wsattr(L7PolicyResponse)
 
 
+class BatchL7PoliciesRootResponse(types.BaseType):
+    l7policies = wtypes.wsattr([L7PolicyResponse])
+
+
 class L7PoliciesRootResponse(types.BaseType):
     l7policies = wtypes.wsattr([L7PolicyResponse])
     l7policies_links = wtypes.wsattr([types.PageType])
@@ -125,6 +129,17 @@ class L7PolicyPUT(BaseL7PolicyType):
 
 class L7PolicyRootPUT(types.BaseType):
     l7policy = wtypes.wsattr(L7PolicyPUT)
+
+
+class L7policiesPUT(types.BaseType):
+    id = wtypes.wsattr(wtypes.UuidType())
+    position = wtypes.wsattr(wtypes.IntegerType(
+        minimum=constants.MIN_POLICY_POSITION,
+        maximum=constants.MAX_POLICY_POSITION))
+
+
+class L7policiesRootPUT(types.BaseType):
+    l7policies = wtypes.wsattr([L7policiesPUT])
 
 
 class L7PolicySingleCreate(BaseL7PolicyType):

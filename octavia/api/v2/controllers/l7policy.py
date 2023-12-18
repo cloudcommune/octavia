@@ -42,6 +42,9 @@ LOG = logging.getLogger(__name__)
 
 class L7PolicyController(base.BaseController):
     RBAC_TYPE = constants.RBAC_L7POLICY
+    _custom_actions = {
+        'batch_update': ['PUT']
+    }
 
     def __init__(self):
         super().__init__()
@@ -106,11 +109,11 @@ class L7PolicyController(base.BaseController):
                                                      **l7policy_dict)
         except odb_exceptions.DBDuplicateEntry as e:
             raise exceptions.IDAlreadyExists() from e
-        except odb_exceptions.DBReferenceError as e:
-            raise exceptions.InvalidOption(value=l7policy_dict.get(e.key),
-                                           option=e.key) from e
         except odb_exceptions.DBError as e:
-            raise exceptions.APIException() from e
+            # TODO(blogan): will have to do separate validation protocol
+            # before creation or update since the exception messages
+            # do not give any information as to what constraint failed
+            raise exceptions.InvalidOption(value='', option='') from e
 
     @wsme_pecan.wsexpose(l7policy_types.L7PolicyRootResponse,
                          body=l7policy_types.L7PolicyRootPOST, status_code=201)
@@ -274,6 +277,65 @@ class L7PolicyController(base.BaseController):
         result = self._convert_db_to_type(db_l7policy,
                                           l7policy_types.L7PolicyResponse)
         return l7policy_types.L7PolicyRootResponse(l7policy=result)
+
+    @wsme_pecan.wsexpose(l7policy_types.BatchL7PoliciesRootResponse,
+                         wtypes.text, body=l7policy_types.L7policiesRootPUT,
+                         status_code=200)
+    def batch_update(self, l7policies):
+        # l7policies should be a list
+        l7policies_dict = l7policies.to_dict()
+        LOG.info("Update a batch of policies: %s" % l7policies_dict)
+        context = pecan_request.context.get('octavia_context')
+        new_l7policy_list = []
+        load_balancers_id = set()
+        listeners_id = set()
+        for l7policy in l7policies_dict.get('l7policies'):
+            db_l7policy = self._get_db_l7policy(context.session, l7policy.get('id'),
+                                                show_deleted=False)
+            load_balancer_id, listener_id = self._get_listener_and_loadbalancer_id(
+                db_l7policy)
+            load_balancers_id.add(load_balancer_id)
+            listeners_id.add(listener_id)
+            if len(load_balancers_id) != 1 or len(listeners_id) != 1:
+                raise exceptions.InvalidL7PolicyArgs(msg="The L7policies don't belong to one"
+                                                     "load_balancer or listener")
+            l7policy['l7policy_id'] = l7policy.pop('id')
+            new_l7policy_list.append(driver_dm.L7Policy.from_dict(l7policy))
+
+        project_id, provider = self._get_lb_project_id_provider(
+                context.session, load_balancer_id)
+
+        self._auth_validate_action(context, project_id, constants.RBAC_PUT)
+        # Load the driver early as it also provides validation
+        driver = driver_factory.get_driver(provider)
+        with db_api.get_lock_session() as lock_session:
+
+            self._test_lb_and_listener_statuses(lock_session,
+                                                lb_id=load_balancer_id,
+                                                listener_ids=[listener_id])
+
+            # Dispatch to the driver
+            LOG.info("Sending update L7 Policy %s to provider %s",
+                     id, driver.name)
+            driver_utils.call_provider(
+                driver.name, driver.l7policy_batch_update,
+                new_l7policy_list)
+
+            # Update the database to reflect what the driver just accepted
+            for new_l7policy in l7policies_dict.get('l7policies'):
+                new_l7policy['provisioning_status'] = constants.PENDING_UPDATE
+                self.repositories.l7policy.update(lock_session, id=new_l7policy.pop('l7policy_id'),
+                                                  **new_l7policy)
+        # Force SQL alchemy to query the DB, otherwise we get inconsistent
+        # results
+        context.session.expire_all()
+        result = []
+        for l7policy in l7policies.to_dict().get('l7policies'):
+            db_l7policy = self._get_db_l7policy(context.session, l7policy.get('id'))
+            result.append(self._convert_db_to_type(db_l7policy,
+                                                   l7policy_types.L7PolicyResponse))
+
+        return l7policy_types.BatchL7PoliciesRootResponse(l7policies=result)
 
     @wsme_pecan.wsexpose(None, wtypes.text, status_code=204)
     def delete(self, id):

@@ -67,23 +67,9 @@ class TestL7RulePOST(base.BaseTypesTest):
                           body)
 
     def test_invalid_value(self):
-        body = {"type": constants.L7RULE_TYPE_PATH,
+        body = {"type": "notvalid",
                 "compare_type": constants.L7RULE_COMPARE_TYPE_STARTS_WITH,
                 "value": 123}
-        self.assertRaises(exc.InvalidInput, wsme_json.fromjson, self._type,
-                          body)
-
-    def test_invalid_value_whitespace(self):
-        body = {"type": constants.L7RULE_TYPE_PATH,
-                "compare_type": constants.L7RULE_COMPARE_TYPE_STARTS_WITH,
-                "value": "12\n3"}
-        self.assertRaises(exc.InvalidInput, wsme_json.fromjson, self._type,
-                          body)
-
-    def test_invalid_key_whitespace(self):
-        body = {"type": constants.L7RULE_TYPE_PATH,
-                "compare_type": constants.L7RULE_COMPARE_TYPE_STARTS_WITH,
-                "key": "12\n3"}
         self.assertRaises(exc.InvalidInput, wsme_json.fromjson, self._type,
                           body)
 
@@ -150,16 +136,6 @@ class TestL7RulePUT(base.BaseTypesTest):
 
     def test_invalid_value(self):
         body = {"value": 123}
-        self.assertRaises(exc.InvalidInput, wsme_json.fromjson, self._type,
-                          body)
-
-    def test_invalid_value_linefeed(self):
-        body = {"value": "12\n3"}
-        self.assertRaises(exc.InvalidInput, wsme_json.fromjson, self._type,
-                          body)
-
-    def test_invalid_key_linefeed(self):
-        body = {"key": "12\n3"}
         self.assertRaises(exc.InvalidInput, wsme_json.fromjson, self._type,
                           body)
 

@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenStack Octavia Prometheus Proxy
+After=network.target syslog.service amphora-agent.service
+Requires=amphora-agent.service prometheus-proxy.service
+
+[Service]
+ExecStart=/usr/local/bin/prometheus-proxy-mgmt
+KillMode=mixed
+Restart=always
+ExecStartPost=/bin/sh -c "echo $MAINPID > /var/run/prometheus-proxy-mgmt.pid"
+PIDFile=/var/run/prometheus-proxy-mgmt.pid
+
+[Install]
+WantedBy=multi-user.target

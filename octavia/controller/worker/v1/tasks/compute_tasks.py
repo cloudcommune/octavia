@@ -53,7 +53,8 @@ class ComputeCreate(BaseComputeTask):
 
     def execute(self, amphora_id, server_group_id, config_drive_files=None,
                 build_type_priority=constants.LB_CREATE_NORMAL_PRIORITY,
-                ports=None, flavor=None, availability_zone=None):
+                ports=None, flavor=None, availability_zone=None,
+                loadbalancer_topology=None, gateway_ip=None):
         """Create an amphora
 
         :returns: an amphora
@@ -76,7 +77,10 @@ class ComputeCreate(BaseComputeTask):
             amp_image_tag = flavor.get(
                 constants.AMP_IMAGE_TAG, CONF.controller_worker.amp_image_tag)
         else:
-            topology = CONF.controller_worker.loadbalancer_topology
+            if loadbalancer_topology:
+                topology = loadbalancer_topology
+            else:
+                topology = CONF.controller_worker.loadbalancer_topology
             amp_compute_flavor = CONF.controller_worker.amp_flavor_id
             amp_image_tag = CONF.controller_worker.amp_image_tag
 
@@ -95,17 +99,16 @@ class ComputeCreate(BaseComputeTask):
 
             agent_cfg = agent_jinja_cfg.AgentJinjaTemplater()
             config_drive_files['/etc/octavia/amphora-agent.conf'] = (
-                agent_cfg.build_agent_config(amphora_id, topology))
-
+                agent_cfg.build_agent_config(amphora_id, topology, gateway_ip))
             logging_cfg = logging_jinja_cfg.LoggingJinjaTemplater(
                 CONF.amphora_agent.logging_template_override)
             config_drive_files['/etc/rsyslog.d/10-rsyslog.conf'] = (
                 logging_cfg.build_logging_config())
 
-            udtemplater = user_data_jinja_cfg.UserDataJinjaCfg()
-            user_data = udtemplater.build_user_data_config(
-                config_drive_files if user_data_config_drive else {})
             if user_data_config_drive:
+                udtemplater = user_data_jinja_cfg.UserDataJinjaCfg()
+                user_data = udtemplater.build_user_data_config(
+                    config_drive_files)
                 config_drive_files = None
 
             compute_id = self.compute.build(
@@ -151,7 +154,8 @@ class ComputeCreate(BaseComputeTask):
 class CertComputeCreate(ComputeCreate):
     def execute(self, amphora_id, server_pem, server_group_id,
                 build_type_priority=constants.LB_CREATE_NORMAL_PRIORITY,
-                ports=None, flavor=None, availability_zone=None):
+                ports=None, flavor=None, availability_zone=None,
+                loadbalancer_topology=None, gateway_ip=None):
         """Create an amphora
 
         :returns: an amphora
@@ -165,14 +169,14 @@ class CertComputeCreate(ComputeCreate):
         key = utils.get_compatible_server_certs_key_passphrase()
         fer = fernet.Fernet(key)
         config_drive_files = {
-            '/etc/octavia/certs/server.pem': fer.decrypt(
-                server_pem).decode('utf-8'),
+            '/etc/octavia/certs/server.pem': fer.decrypt(server_pem),
             '/etc/octavia/certs/client_ca.pem': ca}
         return super().execute(
             amphora_id, config_drive_files=config_drive_files,
             build_type_priority=build_type_priority,
             server_group_id=server_group_id, ports=ports, flavor=flavor,
-            availability_zone=availability_zone)
+            availability_zone=availability_zone, loadbalancer_topology=None,
+            gateway_ip=gateway_ip)
 
 
 class DeleteAmphoraeOnLoadBalancer(BaseComputeTask):

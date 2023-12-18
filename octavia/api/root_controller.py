@@ -34,12 +34,13 @@ class RootController(object):
         super().__init__()
         setattr(self, 'v2.0', v2_controller.V2Controller())
         setattr(self, 'v2', v2_controller.V2Controller())
+        setattr(self, 'prom_endpoints', v2_controller.PrometheusController())
         if CONF.api_settings.healthcheck_enabled:
             self.healthcheck_obj = healthcheck.Healthcheck.app_factory(None)
 
     # Run the oslo middleware healthcheck for /healthcheck
     @pecan_expose('json')
-    @pecan_expose(content_type='text/plain')
+    @pecan_expose(content_type='plain/text')
     @pecan_expose(content_type='text/html')
     def healthcheck(self):  # pylint: disable=inconsistent-return-statements
         if CONF.api_settings.healthcheck_enabled:

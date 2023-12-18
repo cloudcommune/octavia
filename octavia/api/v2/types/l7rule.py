@@ -69,11 +69,8 @@ class L7RulePOST(BaseL7Type):
     compare_type = wtypes.wsattr(
         wtypes.Enum(str, *constants.SUPPORTED_L7RULE_COMPARE_TYPES),
         mandatory=True)
-    key = wtypes.wsattr(wtypes.StringType(max_length=255,
-                                          pattern=r'^[^\r\n]*$'))
-    value = wtypes.wsattr(wtypes.StringType(max_length=255,
-                                            pattern=r'^[^\r\n]*$'),
-                          mandatory=True)
+    key = wtypes.wsattr(wtypes.StringType(max_length=255))
+    value = wtypes.wsattr(wtypes.StringType(max_length=255), mandatory=True)
     invert = wtypes.wsattr(bool, default=False)
     admin_state_up = wtypes.wsattr(bool, default=True)
     # TODO(johnsom) Remove after deprecation (R series)
@@ -93,10 +90,8 @@ class L7RulePUT(BaseL7Type):
     compare_type = wtypes.wsattr(
         wtypes.Enum(str,
                     *constants.SUPPORTED_L7RULE_COMPARE_TYPES))
-    key = wtypes.wsattr(wtypes.StringType(max_length=255,
-                                          pattern=r'^[^\r\n]*$'))
-    value = wtypes.wsattr(wtypes.StringType(max_length=255,
-                                            pattern=r'^[^\r\n]*$'))
+    key = wtypes.wsattr(wtypes.StringType(max_length=255))
+    value = wtypes.wsattr(wtypes.StringType(max_length=255))
     invert = wtypes.wsattr(bool)
     admin_state_up = wtypes.wsattr(bool)
     tags = wtypes.wsattr(wtypes.ArrayType(wtypes.StringType(max_length=255)))

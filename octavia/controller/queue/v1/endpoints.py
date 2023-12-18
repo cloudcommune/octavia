@@ -60,6 +60,11 @@ class Endpoints(object):
                  load_balancer_id)
         self.worker.failover_loadbalancer(load_balancer_id)
 
+    def scale_load_balancer(self, context, load_balancer_id):
+        LOG.info('Scaling  amphora in load balancer \'%s\'...',
+                 load_balancer_id)
+        self.worker.scale_load_balancer(load_balancer_id)
+
     def failover_amphora(self, context, amphora_id):
         LOG.info('Failing over amphora \'%s\'...',
                  amphora_id)
@@ -133,6 +138,10 @@ class Endpoints(object):
     def update_l7policy(self, context, l7policy_id, l7policy_updates):
         LOG.info('Updating l7policy \'%s\'...', l7policy_id)
         self.worker.update_l7policy(l7policy_id, l7policy_updates)
+
+    def batch_update_l7policy(self, context, l7policies):
+        LOG.info(f"Updating L7policies: {l7policies}")
+        self.worker.batch_update_l7policy(l7policies)
 
     def delete_l7policy(self, context, l7policy_id):
         LOG.info('Deleting l7policy \'%s\'...', l7policy_id)

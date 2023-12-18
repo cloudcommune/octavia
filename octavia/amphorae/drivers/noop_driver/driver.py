@@ -85,12 +85,20 @@ class NoopManager(object):
                   self.__class__.__name__, amphora.id)
         self.amphoraconfig[amphora.id] = (amphora.id, 'finalize amphora')
 
-    def post_network_plug(self, amphora, port, amphora_network_config):
-        LOG.debug("Amphora %s no-op, post network plug amphora %s, port %s, "
-                  "amphora_network_config %s", self.__class__.__name__,
-                  amphora.id, port.id, amphora_network_config)
+    def post_network_plug(self, amphora, port):
+        LOG.debug("Amphora %s no-op, post network plug amphora %s, port %s",
+                  self.__class__.__name__, amphora.id, port.id)
         self.amphoraconfig[amphora.id, port.id] = (amphora.id, port.id,
                                                    'post_network_plug')
+
+    # multi active
+    def post_loop_vip_plug(self, amphora, load_balancer,
+                           amphorae_network_config, vrrp_port=None,
+                           vip_subnet=None):
+        LOG.debug("Amphora %s no-op, post loop vip plug load balancer %s",
+                  self.__class__.__name__, load_balancer.id)
+        self.amphoraconfig[(load_balancer.id, id(amphorae_network_config))] = (
+            load_balancer.id, amphorae_network_config, 'post_loop_vip_plug')
 
     def post_vip_plug(self, amphora, load_balancer, amphorae_network_config,
                       vrrp_port=None, vip_subnet=None):
@@ -161,9 +169,15 @@ class NoopAmphoraLoadBalancerDriver(
 
         self.driver.finalize_amphora(amphora)
 
-    def post_network_plug(self, amphora, port, amphora_network_config):
+    def post_network_plug(self, amphora, port):
 
-        self.driver.post_network_plug(amphora, port, amphora_network_config)
+        self.driver.post_network_plug(amphora, port)
+
+    def post_loop_vip_plug(self, amphora, load_balancer,
+                           amphorae_network_config, vip_subnet=None):
+        self.driver.post_loop_vip_plug(amphora,
+                                       load_balancer, amphorae_network_config,
+                                       vip_subnet=vip_subnet)
 
     def post_vip_plug(self, amphora, load_balancer, amphorae_network_config,
                       vrrp_port=None, vip_subnet=None):
@@ -194,7 +208,4 @@ class NoopAmphoraLoadBalancerDriver(
         pass
 
     def reload_vrrp_service(self, loadbalancer):
-        pass
-
-    def check(self, amphora, timeout_dict=None):
         pass

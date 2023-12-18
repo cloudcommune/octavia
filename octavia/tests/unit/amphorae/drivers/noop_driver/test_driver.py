@@ -115,9 +115,7 @@ class TestNoopAmphoraLoadBalancerDriver(base.TestCase):
                              self.amphora.id])
 
     def test_post_network_plug(self):
-        self.driver.post_network_plug(
-            self.amphora, self.port,
-            self.amphorae_net_configs[self.amphora.id])
+        self.driver.post_network_plug(self.amphora, self.port)
         self.assertEqual((self.amphora.id, self.port.id, 'post_network_plug'),
                          self.driver.driver.amphoraconfig[(
                              self.amphora.id, self.port.id)])

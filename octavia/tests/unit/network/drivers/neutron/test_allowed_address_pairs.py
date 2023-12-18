@@ -871,10 +871,7 @@ class TestAllowedAddressPairsDriver(base.TestCase):
 
     @mock.patch("time.time")
     @mock.patch("time.sleep")
-    @mock.patch("octavia.network.drivers.neutron.allowed_address_pairs."
-                "AllowedAddressPairsDriver.unplug_network")
-    def test_unplug_aap_port(self, mock_unplug_network,
-                             mock_time_sleep, mock_time_time):
+    def test_unplug_aap_port(self, mock_time_sleep, mock_time_time):
         lb = dmh.generate_load_balancer_tree()
         update_port = self.driver.neutron_client.update_port
         port1 = t_constants.MOCK_NEUTRON_PORT['port']
@@ -897,8 +894,6 @@ class TestAllowedAddressPairsDriver(base.TestCase):
         self.driver.unplug_aap_port(lb.vip, lb.amphorae[0], subnet)
         clear_aap = {'port': {'allowed_address_pairs': []}}
         update_port.assert_called_once_with(port2.get('id'), clear_aap)
-        mock_unplug_network.assert_called_once_with(
-            lb.amphorae[0].compute_id, subnet.network_id)
 
     def test_plug_network_when_compute_instance_cant_be_found(self):
         net_id = t_constants.MOCK_NOVA_INTERFACE.net_id

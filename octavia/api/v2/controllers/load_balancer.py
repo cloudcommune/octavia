@@ -120,7 +120,8 @@ class LoadBalancersController(base.BaseController):
 
     @staticmethod
     def _validate_network_and_fill_or_validate_subnet(load_balancer,
-                                                      context=None):
+                                                      context=None,
+                                                      flavor_dict=None):
         network = validate.network_exists_optionally_contains_subnet(
             network_id=load_balancer.vip_network_id,
             subnet_id=load_balancer.vip_subnet_id,
@@ -148,12 +149,24 @@ class LoadBalancersController(base.BaseController):
                     ))
                 ip_avail = network_driver.get_network_ip_availability(
                     network)
-                if (CONF.controller_worker.loadbalancer_topology ==
-                        constants.TOPOLOGY_SINGLE):
-                    num_req_ips = 2
-                if (CONF.controller_worker.loadbalancer_topology ==
-                        constants.TOPOLOGY_ACTIVE_STANDBY):
-                    num_req_ips = 3
+                if flavor_dict.get('loadbalancer_topology', None):
+                    topology = flavor_dict.get('loadbalancer_topology')
+                    if topology == constants.TOPOLOGY_SINGLE:
+                        num_req_ips = 2
+                    if topology == constants.TOPOLOGY_ACTIVE_STANDBY:
+                        num_req_ips = 3
+                    if topology == constants.TOPOLOGY_MULTI_ACTIVE:
+                        num_req_ips = flavor_dict.get('multi_active_num') + 1
+                else:
+                    if (CONF.controller_worker.loadbalancer_topology ==
+                            constants.TOPOLOGY_SINGLE):
+                        num_req_ips = 2
+                    if (CONF.controller_worker.loadbalancer_topology ==
+                            constants.TOPOLOGY_ACTIVE_STANDBY):
+                        num_req_ips = 3
+                    if (CONF.controller_worker.loadbalancer_topology ==
+                            constants.TOPOLOGY_MULTI_ACTIVE):
+                        num_req_ips = CONF.controller_worker.multi_active_num + 1
                 subnets = [subnet_id for subnet_id in network.subnets if
                            utils.subnet_ip_availability(ip_avail, subnet_id,
                                                         num_req_ips)]
@@ -223,7 +236,7 @@ class LoadBalancersController(base.BaseController):
                 "VIP port's subnet could not be determined. Please "
                 "specify either a VIP subnet or address."))
 
-    def _validate_vip_request_object(self, load_balancer, context=None):
+    def _validate_vip_request_object(self, load_balancer, context=None, flavor_dict=None):
         allowed_network_objects = []
         if CONF.networking.allow_vip_port_id:
             allowed_network_objects.append('vip_port_id')
@@ -260,7 +273,8 @@ class LoadBalancersController(base.BaseController):
         # If no port id, validate the network id (and subnet if provided)
         elif load_balancer.vip_network_id:
             self._validate_network_and_fill_or_validate_subnet(load_balancer,
-                                                               context=context)
+                                                               context=context,
+                                                               flavor_dict=flavor_dict)
         # Validate just the subnet id
         elif load_balancer.vip_subnet_id:
             subnet = validate.subnet_exists(
@@ -269,6 +283,15 @@ class LoadBalancersController(base.BaseController):
         if load_balancer.vip_qos_policy_id:
             validate.qos_policy_exists(
                 qos_policy_id=load_balancer.vip_qos_policy_id)
+        # multi type need check this subnet has routers
+        if flavor_dict.get('loadbalancer_topology', None):
+            lb_topology = flavor_dict.get('loadbalancer_topology')
+        else:
+            lb_topology = CONF.controller_worker.loadbalancer_topology
+
+        if lb_topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            validate.get_router_id(load_balancer.vip_network_id,
+                                   load_balancer.vip_subnet_id)
 
     def _create_vip_port_if_not_exist(self, load_balancer_db):
         """Create vip port."""
@@ -405,13 +428,18 @@ class LoadBalancersController(base.BaseController):
                 "Missing project ID in request where one is required. "
                 "An administrator should check the keystone settings "
                 "in the Octavia configuration."))
+        self._validate_flavor(context.session, load_balancer)
 
         self._auth_validate_action(context, load_balancer.project_id,
                                    constants.RBAC_POST)
 
-        self._validate_vip_request_object(load_balancer, context=context)
+        if load_balancer.flavor_id:
+            flavor_dict = self.repositories.flavor.get_flavor_metadata_dict(
+                context.session, load_balancer.flavor_id)
+        else:
+            flavor_dict = {}
 
-        self._validate_flavor(context.session, load_balancer)
+        self._validate_vip_request_object(load_balancer, context=context, flavor_dict=flavor_dict)
 
         self._validate_availability_zone(context.session, load_balancer)
 
@@ -738,7 +766,8 @@ class LoadBalancersController(base.BaseController):
         is_children = (
             id and remainder and (
                 remainder[0] == 'status' or remainder[0] == 'statuses' or (
-                    remainder[0] == 'stats' or remainder[0] == 'failover'
+                    remainder[0] == 'stats' or remainder[0] == 'failover' or
+                    remainder[0] == 'resize'
                 )
             )
         )
@@ -751,6 +780,8 @@ class LoadBalancersController(base.BaseController):
                 return StatisticsController(lb_id=id), remainder
             if controller == 'failover':
                 return FailoverController(lb_id=id), remainder
+            if controller == 'resize':
+                return ResizeController(lb_id=id), remainder
         return None
 
 
@@ -809,6 +840,77 @@ class StatisticsController(base.BaseController, stats.StatsMixin):
         result = self._convert_db_to_type(
             lb_stats, lb_types.LoadBalancerStatisticsResponse)
         return lb_types.StatisticsRootResponse(stats=result)
+
+
+class ResizeController(LoadBalancersController):
+
+    def __init__(self, lb_id):
+        super().__init__()
+        self.lb_id = lb_id
+
+    def _check_multi_scale(self, session, lb, old_flavor_id, new_flavor_id):
+        if not old_flavor_id:
+            return False
+        amps = len([a for a in lb.amphorae
+                    if a.status != constants.DELETED])
+        old_flavor_dict = self.repositories.flavor.\
+            get_flavor_metadata_dict(session, old_flavor_id)
+        new_flavor_dict = self.repositories.flavor.\
+            get_flavor_metadata_dict(session, new_flavor_id)
+        if old_flavor_dict.get('compute_flavor') !=\
+                new_flavor_dict.get('compute_flavor'):
+            return False
+        if old_flavor_dict.get('loadbalancer_topology') == new_flavor_dict.\
+                get('loadbalancer_topology') == constants.\
+                TOPOLOGY_MULTI_ACTIVE:
+            if new_flavor_dict.get(constants.MULTI_ACTIVE_NUM) >\
+                    old_flavor_dict.get(constants.MULTI_ACTIVE_NUM):
+                return True
+            elif new_flavor_dict.get(constants.MULTI_ACTIVE_NUM) > amps:
+                return True
+        return False
+
+    @wsme_pecan.wsexpose(None, body=lb_types.ResizeRootPUT, status_code=202,)
+    def put(self, flavor):
+        """Update lb flavor in database"""
+        LOG.debug(f"flavor is: {flavor}")
+        flavor_id = flavor.flavor_id
+        context = pecan_request.context.get('octavia_context')
+        load_balancer = self._get_db_lb(context.session, self.lb_id,
+                                        show_deleted=False)
+        if not load_balancer:
+            LOG.info("Load balancer %s not found.", id)
+            raise exceptions.NotFound(
+                resource=data_models.LoadBalancer._name(),
+                id=id)
+
+        # check if the flavor is exists
+        self._get_db_flavor(context.session, flavor_id)
+        scale_amphora = self._check_multi_scale(context.session,
+                                                load_balancer,
+                                                load_balancer.flavor_id,
+                                                flavor_id)
+
+        # Update the new flavor in DB
+        with db_api.get_lock_session() as lock_session:
+            self.repositories.load_balancer.update(lock_session, self.lb_id, flavor_id=flavor_id)
+
+        # perform load balancer failover, copied from FailoverController.put
+        self._auth_validate_action(context, load_balancer.project_id,
+                                   constants.RBAC_PUT_FAILOVER)
+        driver = driver_factory.get_driver(load_balancer.provider)
+        with db_api.get_lock_session() as lock_session:
+            self._test_and_set_failover_prov_status(lock_session, self.lb_id)
+            LOG.info("Sending scale request for load balancer %s to the "
+                     "provider %s", self.lb_id, driver.name)
+            if scale_amphora:
+                driver_utils.call_provider(
+                    driver.name, driver.loadbalancer_scale, self.lb_id)
+            else:
+                LOG.info("Sending failover request for load balancer %s to the "
+                         "provider %s", self.lb_id, driver.name)
+                driver_utils.call_provider(
+                    driver.name, driver.loadbalancer_failover, self.lb_id)
 
 
 class FailoverController(LoadBalancersController):

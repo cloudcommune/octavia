@@ -92,3 +92,23 @@ class L7PolicyFlows(object):
             requires=[constants.LOADBALANCER, constants.LISTENERS]))
 
         return update_l7policy_flow
+
+    def get_batch_update_l7policies_flow(self):
+        """Create a flow to update a batch of L7 policies
+
+        :returns: The flow for updating an L7 policy
+        """
+        update_l7policies_flow = linear_flow.Flow(constants.BATCH_UPDATE_L7POLICY_FLOW)
+        update_l7policies_flow.add(lifecycle_tasks.L7PoliciesToErrorOnRevertTask(
+            requires=[constants.L7POLICIES,
+                      constants.LISTENERS,
+                      constants.LOADBALANCER]))
+        update_l7policies_flow.add(database_tasks.MarkL7PoliciesPendingUpdateInDB(
+            requires=constants.L7POLICIES))
+        update_l7policies_flow.add(amphora_driver_tasks.ListenersUpdate(
+            requires=constants.LOADBALANCER))
+        update_l7policies_flow.add(database_tasks.MarkL7PoliciesActiveInDB(
+            requires=constants.L7POLICIES))
+        update_l7policies_flow.add(database_tasks.MarkLBAndListenersActiveInDB(
+            requires=[constants.LOADBALANCER, constants.LISTENERS]))
+        return update_l7policies_flow

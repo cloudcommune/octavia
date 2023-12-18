@@ -77,8 +77,9 @@ class Checks(upgradecheck.UpgradeCommands):
               'section.'))
 
     def _check_amphorav2(self):
+        default_provider_driver = CONF.api_settings.default_provider_driver
         enabled_provider_drivers = CONF.api_settings.enabled_provider_drivers
-        if (constants.AMPHORA in enabled_provider_drivers or
+        if (default_provider_driver == constants.AMPHORAV2 or
                 constants.AMPHORAV2 in enabled_provider_drivers):
             persistence = self._check_persistence()
             if isinstance(persistence, upgradecheck.Result):

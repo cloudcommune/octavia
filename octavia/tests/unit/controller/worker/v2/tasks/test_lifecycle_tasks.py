@@ -126,7 +126,7 @@ class TestLifecycleTasks(base.TestCase):
                                              self.LOADBALANCER)
 
         mock_health_mon_prov_status_error.assert_called_once_with(
-            self.HEALTH_MON_ID)
+            self.POOL_ID)
         mock_loadbalancer_prov_status_active.assert_called_once_with(
             self.LOADBALANCER_ID)
         mock_listener_prov_status_active.assert_called_once_with(

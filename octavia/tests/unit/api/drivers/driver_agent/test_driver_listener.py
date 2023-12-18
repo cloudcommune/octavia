@@ -12,8 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 import errno
-import socket
-import time
 from unittest import mock
 
 from oslo_config import cfg
@@ -29,13 +27,6 @@ class TestDriverListener(base.TestCase):
 
     def setUp(self):
         super().setUp()
-
-    def _wait_until_called(self, mock_to_be_called):
-        """Wait for up to 1 sec for the given mock to be called."""
-        for _ in range(10):
-            if mock_to_be_called.call_count > 0:
-                break
-            time.sleep(.1)
 
     @mock.patch('octavia.api.drivers.driver_agent.driver_listener.memoryview')
     def test_recv(self, mock_memoryview):
@@ -94,57 +85,6 @@ class TestDriverListener(base.TestCase):
     @mock.patch('octavia.api.drivers.driver_agent.driver_updater.'
                 'DriverUpdater')
     @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
-    def test_StatusRequestHandler_handle_recv_timeout(self, mock_recv,
-                                                      mock_driverupdater):
-        TEST_OBJECT = {"test": "msg"}
-        mock_recv.side_effect = socket.timeout
-        mock_updater = mock.MagicMock()
-        mock_update_loadbalancer_status = mock.MagicMock()
-        mock_update_loadbalancer_status.return_value = TEST_OBJECT
-        mock_updater.update_loadbalancer_status = (
-            mock_update_loadbalancer_status)
-        mock_driverupdater.return_value = mock_updater
-        mock_request = mock.MagicMock()
-
-        StatusRequestHandler = driver_listener.StatusRequestHandler(
-            mock_request, 'bogus', 'bogus')
-        StatusRequestHandler.handle()
-
-        mock_recv.assert_called_with(mock_request)
-        mock_update_loadbalancer_status.assert_not_called()
-
-    @mock.patch('octavia.api.drivers.driver_agent.driver_updater.'
-                'DriverUpdater')
-    @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
-    def test_StatusRequestHandler_handle_send_timeout(self, mock_recv,
-                                                      mock_driverupdater):
-        TEST_OBJECT = {"test": "msg"}
-        mock_recv.return_value = 'bogus'
-        mock_updater = mock.MagicMock()
-        mock_update_loadbalancer_status = mock.MagicMock()
-        mock_update_loadbalancer_status.return_value = TEST_OBJECT
-        mock_updater.update_loadbalancer_status = (
-            mock_update_loadbalancer_status)
-        mock_driverupdater.return_value = mock_updater
-        mock_request = mock.MagicMock()
-        mock_send = mock.MagicMock()
-        mock_send.side_effect = socket.timeout
-        mock_sendall = mock.MagicMock()
-        mock_request.send = mock_send
-        mock_request.sendall = mock_sendall
-
-        StatusRequestHandler = driver_listener.StatusRequestHandler(
-            mock_request, 'bogus', 'bogus')
-        StatusRequestHandler.handle()
-
-        mock_recv.assert_called_with(mock_request)
-        mock_update_loadbalancer_status.assert_called_with('bogus')
-        mock_send.assert_called_with(b'15\n')
-        mock_sendall.assert_not_called()
-
-    @mock.patch('octavia.api.drivers.driver_agent.driver_updater.'
-                'DriverUpdater')
-    @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
     def test_StatsRequestHandler_handle(self, mock_recv, mock_driverupdater):
         TEST_OBJECT = {"test": "msg"}
         mock_recv.return_value = 'bogus'
@@ -167,55 +107,6 @@ class TestDriverListener(base.TestCase):
         mock_update_listener_stats.assert_called_with('bogus')
         mock_send.assert_called_with(b'15\n')
         mock_sendall.assert_called_with(jsonutils.dump_as_bytes(TEST_OBJECT))
-
-    @mock.patch('octavia.api.drivers.driver_agent.driver_updater.'
-                'DriverUpdater')
-    @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
-    def test_StatsRequestHandler_handle_recv_timeout(self, mock_recv,
-                                                     mock_driverupdater):
-        TEST_OBJECT = {"test": "msg"}
-        mock_recv.side_effect = socket.timeout
-        mock_updater = mock.MagicMock()
-        mock_update_listener_stats = mock.MagicMock()
-        mock_update_listener_stats.return_value = TEST_OBJECT
-        mock_updater.update_listener_statistics = (mock_update_listener_stats)
-        mock_driverupdater.return_value = mock_updater
-        mock_request = mock.MagicMock()
-
-        StatsRequestHandler = driver_listener.StatsRequestHandler(
-            mock_request, 'bogus', 'bogus')
-        StatsRequestHandler.handle()
-
-        mock_recv.assert_called_with(mock_request)
-        mock_update_listener_stats.assert_not_called()
-
-    @mock.patch('octavia.api.drivers.driver_agent.driver_updater.'
-                'DriverUpdater')
-    @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
-    def test_StatsRequestHandler_handle_send_timeout(self, mock_recv,
-                                                     mock_driverupdater):
-        TEST_OBJECT = {"test": "msg"}
-        mock_recv.return_value = 'bogus'
-        mock_updater = mock.MagicMock()
-        mock_update_listener_stats = mock.MagicMock()
-        mock_update_listener_stats.return_value = TEST_OBJECT
-        mock_updater.update_listener_statistics = (mock_update_listener_stats)
-        mock_driverupdater.return_value = mock_updater
-        mock_request = mock.MagicMock()
-        mock_send = mock.MagicMock()
-        mock_send.side_effect = socket.timeout
-        mock_sendall = mock.MagicMock()
-        mock_request.send = mock_send
-        mock_request.sendall = mock_sendall
-
-        StatsRequestHandler = driver_listener.StatsRequestHandler(
-            mock_request, 'bogus', 'bogus')
-        StatsRequestHandler.handle()
-
-        mock_recv.assert_called_with(mock_request)
-        mock_update_listener_stats.assert_called_with('bogus')
-        mock_send.assert_called_with(b'15\n')
-        mock_sendall.assert_not_called()
 
     @mock.patch('octavia.api.drivers.driver_agent.driver_get.'
                 'process_get')
@@ -242,52 +133,6 @@ class TestDriverListener(base.TestCase):
         mock_send.assert_called_with(b'15\n')
         mock_sendall.assert_called_with(jsonutils.dump_as_bytes(TEST_OBJECT))
 
-    @mock.patch('octavia.api.drivers.driver_agent.driver_get.'
-                'process_get')
-    @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
-    def test_GetRequestHandler_handle_recv_timeout(self, mock_recv,
-                                                   mock_process_get):
-        TEST_OBJECT = {"test": "msg"}
-
-        mock_recv.side_effect = socket.timeout
-
-        mock_process_get.return_value = TEST_OBJECT
-        mock_request = mock.MagicMock()
-
-        GetRequestHandler = driver_listener.GetRequestHandler(
-            mock_request, 'bogus', 'bogus')
-        GetRequestHandler.handle()
-
-        mock_recv.assert_called_with(mock_request)
-        mock_process_get.assert_not_called()
-
-    @mock.patch('octavia.api.drivers.driver_agent.driver_get.'
-                'process_get')
-    @mock.patch('octavia.api.drivers.driver_agent.driver_listener._recv')
-    def test_GetRequestHandler_handle_send_timeout(self, mock_recv,
-                                                   mock_process_get):
-        TEST_OBJECT = {"test": "msg"}
-
-        mock_recv.return_value = 'bogus'
-
-        mock_process_get.return_value = TEST_OBJECT
-        mock_request = mock.MagicMock()
-        mock_send = mock.MagicMock()
-        mock_send.side_effect = socket.timeout
-        mock_sendall = mock.MagicMock()
-        mock_request.send = mock_send
-        mock_request.sendall = mock_sendall
-
-        GetRequestHandler = driver_listener.GetRequestHandler(
-            mock_request, 'bogus', 'bogus')
-        GetRequestHandler.handle()
-
-        mock_recv.assert_called_with(mock_request)
-        mock_process_get.assert_called_with('bogus')
-
-        mock_send.assert_called_with(b'15\n')
-        mock_sendall.assert_not_called()
-
     @mock.patch('os.remove')
     def test_cleanup_socket_file(self, mock_remove):
         mock_remove.side_effect = [mock.DEFAULT, OSError,
@@ -311,13 +156,13 @@ class TestDriverListener(base.TestCase):
                          'a' * CONF.driver_agent.status_max_processes, 'a',
                          'a' * 1000, ''])
         type(mock_server).active_children = mock_active_children
-        mock_forking_server.return_value.__enter__.return_value = mock_server
+        mock_forking_server.return_value = mock_server
         mock_exit_event = mock.MagicMock()
         mock_exit_event.is_set.side_effect = [False, False, False, False, True]
 
         driver_listener.status_listener(mock_exit_event)
-        self._wait_until_called(mock_server.serve_forever)
-        mock_server.serve_forever.assert_called()
+        mock_server.handle_request.assert_called()
+        mock_server.server_close.assert_called_once()
         self.assertEqual(2, mock_cleanup.call_count)
 
     @mock.patch('octavia.api.drivers.driver_agent.driver_listener.'
@@ -331,13 +176,13 @@ class TestDriverListener(base.TestCase):
                          'a' * CONF.driver_agent.status_max_processes, 'a',
                          'a' * 1000, ''])
         type(mock_server).active_children = mock_active_children
-        mock_forking_server.return_value.__enter__.return_value = mock_server
+        mock_forking_server.return_value = mock_server
         mock_exit_event = mock.MagicMock()
         mock_exit_event.is_set.side_effect = [False, False, False, False, True]
 
         driver_listener.stats_listener(mock_exit_event)
-        self._wait_until_called(mock_server.serve_forever)
-        mock_server.serve_forever.assert_called()
+        mock_server.handle_request.assert_called()
+        mock_server.server_close.assert_called_once()
 
     @mock.patch('octavia.api.drivers.driver_agent.driver_listener.'
                 '_cleanup_socket_file')
@@ -350,10 +195,10 @@ class TestDriverListener(base.TestCase):
                          'a' * CONF.driver_agent.status_max_processes, 'a',
                          'a' * 1000, ''])
         type(mock_server).active_children = mock_active_children
-        mock_forking_server.return_value.__enter__.return_value = mock_server
+        mock_forking_server.return_value = mock_server
         mock_exit_event = mock.MagicMock()
         mock_exit_event.is_set.side_effect = [False, False, False, False, True]
 
         driver_listener.get_listener(mock_exit_event)
-        self._wait_until_called(mock_server.serve_forever)
-        mock_server.serve_forever.assert_called()
+        mock_server.handle_request.assert_called()
+        mock_server.server_close.assert_called_once()

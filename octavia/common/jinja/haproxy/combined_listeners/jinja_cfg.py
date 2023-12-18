@@ -17,11 +17,12 @@ import re
 
 import jinja2
 from octavia_lib.common import constants as lib_consts
-from oslo_utils import versionutils
 
 from octavia.common.config import cfg
 from octavia.common import constants
 from octavia.common import utils as octavia_utils
+from octavia.db import api as db_api
+from octavia.db import repositories
 
 PROTOCOL_MAP = {
     constants.PROTOCOL_TCP: 'tcp',
@@ -85,12 +86,13 @@ class JinjaTemplater(object):
         self.connection_logging = connection_logging
 
     def build_config(self, host_amphora, listeners, tls_certs,
-                     haproxy_versions, socket_path=None):
+                     haproxy_versions, socket_path=None, enable_prometheus=False):
         """Convert a logical configuration to the HAProxy version
 
         :param host_amphora: The Amphora this configuration is hosted on
         :param listener: The listener configuration
         :param socket_path: The socket path for Haproxy process
+        :param eanble_prometheus: backward compatibility of prometheus
         :return: Rendered configuration
         """
 
@@ -99,18 +101,13 @@ class JinjaTemplater(object):
         # pair might be running an older amphora version.
 
         feature_compatibility = {}
-        version = ".".join(haproxy_versions)
         # Is it newer than haproxy 1.5?
-        if versionutils.is_compatible("1.6.0", version, same_major=False):
+        if not (int(haproxy_versions[0]) < 2 and int(haproxy_versions[1]) < 6):
             feature_compatibility[constants.HTTP_REUSE] = True
-            feature_compatibility[constants.SERVER_STATE_FILE] = True
-        if versionutils.is_compatible("1.9.0", version, same_major=False):
+        if not (int(haproxy_versions[0]) < 2 and int(haproxy_versions[1]) < 9):
             feature_compatibility[constants.POOL_ALPN] = True
-        if int(haproxy_versions[0]) >= 2:
+        if int(haproxy_versions[0]) >= 2 and enable_prometheus:
             feature_compatibility[lib_consts.PROTOCOL_PROMETHEUS] = True
-        # haproxy 2.2 requires insecure-fork-wanted for PING healthchecks
-        if versionutils.is_compatible("2.2.0", version, same_major=False):
-            feature_compatibility[constants.INSECURE_FORK] = True
 
         return self.render_loadbalancer_obj(
             host_amphora, listeners, tls_certs=tls_certs,
@@ -142,10 +139,17 @@ class JinjaTemplater(object):
         #               Currently it either throws an error or just fails
         #               to log the message.
         if protocol not in constants.HAPROXY_HTTP_PROTOCOLS:
-            log_format = log_format.replace('%{+Q}r', '-')
-            log_format = log_format.replace('%r', '-')
             log_format = log_format.replace('%{+Q}ST', '-')
             log_format = log_format.replace('%ST', '-')
+            # replace all http dedicated variables with dash
+            http_dedicated_variables = ['%{+Q}CC', '%CC', '%{+Q}CS', '%CS',
+                                        '%{+Q}HM', '%HM', '%{+Q}HP', '%HP',
+                                        '%{+Q}HQ', '%HQ', '%{+Q}HU', '%HU',
+                                        '%{+Q}HV', '%HV', '%Ta', '%Ti', '%TR', '%Tr',
+                                        '%Tq', '%{+Q}r', '%r',
+                                        '%tr', '%trg', '%trl', '%{+Q}tsc', '%tsc']
+            for v in http_dedicated_variables:
+                log_format = log_format.replace(v, '-')
 
         log_format = log_format.replace(' ', '\\ ')
         return log_format
@@ -173,16 +177,16 @@ class JinjaTemplater(object):
                                           listeners[0].load_balancer.id)
         state_file_path = '%s/%s/servers-state' % (
             self.base_amp_path,
-            listeners[0].load_balancer.id) if feature_compatibility.get(
-            constants.SERVER_STATE_FILE) else ''
-        prometheus_listener = False
-        for listener in listeners:
-            if listener.protocol == lib_consts.PROTOCOL_PROMETHEUS:
-                prometheus_listener = True
-                break
-        require_insecure_fork = feature_compatibility.get(
-            constants.INSECURE_FORK)
-        enable_prometheus = prometheus_listener and feature_compatibility.get(
+            listeners[0].load_balancer.id)
+        # NOTE(wuchunyang): enable prometheus by default for mgmt network.
+        # prometheus_listener = False
+        # for listener in listeners:
+        #     if listener.protocol == lib_consts.PROTOCOL_PROMETHEUS:
+        #         prometheus_listener = True
+        #         break
+        # enable_prometheus = prometheus_listener and feature_compatibility.get(
+        #     lib_consts.PROTOCOL_PROMETHEUS, False)
+        enable_prometheus = feature_compatibility.get(
             lib_consts.PROTOCOL_PROMETHEUS, False)
         return self._get_template().render(
             {'loadbalancer': loadbalancer,
@@ -194,8 +198,7 @@ class JinjaTemplater(object):
                  CONF.amphora_agent.administrative_log_facility,
              'user_log_facility': CONF.amphora_agent.user_log_facility,
              'connection_logging': self.connection_logging,
-             'enable_prometheus': enable_prometheus,
-             'require_insecure_fork': require_insecure_fork},
+             'enable_prometheus': enable_prometheus},
             constants=constants, lib_consts=lib_consts)
 
     def _transform_loadbalancer(self, host_amphora, loadbalancer, listeners,
@@ -225,6 +228,15 @@ class JinjaTemplater(object):
         # NOTE(sbalukoff): Global connection limit should be a sum of all
         # listeners' connection limits.
         connection_limit_sum = 0
+        # NOTE(wuchunyang): if connection limit set in flavor, use it directly.
+        if loadbalancer.flavor_id:
+            flavor_repo = repositories.FlavorRepository()
+            flavor_dict = flavor_repo.get_flavor_metadata_dict(
+                db_api.get_session(), loadbalancer.flavor_id)
+            if flavor_dict.get('connection_limit'):
+                ret_value['global_connection_limit'] = \
+                    flavor_dict.get('connection_limit')
+                return ret_value
         for listener in listeners:
             if listener.protocol in constants.LVS_PROTOCOLS:
                 continue

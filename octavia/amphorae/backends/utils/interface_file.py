@@ -25,11 +25,9 @@ CONF = cfg.CONF
 
 
 class InterfaceFile(object):
-    def __init__(self, name, if_type,
-                 mtu=None, addresses=None,
+    def __init__(self, name, mtu=None, addresses=None,
                  routes=None, rules=None, scripts=None):
         self.name = name
-        self.if_type = if_type
         self.mtu = mtu
         self.addresses = addresses or []
         self.routes = routes or []
@@ -94,7 +92,6 @@ class InterfaceFile(object):
                                flags, mode), 'w') as fp:
             interface = {
                 consts.NAME: self.name,
-                consts.IF_TYPE: self.if_type,
                 consts.ADDRESSES: self.addresses,
                 consts.ROUTES: self.routes,
                 consts.RULES: self.rules,
@@ -109,9 +106,9 @@ class VIPInterfaceFile(InterfaceFile):
     def __init__(self, name, mtu,
                  vip, ip_version, prefixlen,
                  gateway, vrrp_ip, host_routes,
-                 topology, fixed_ips=None):
+                 topology):
 
-        super().__init__(name, if_type=consts.VIP, mtu=mtu)
+        super().__init__(name, mtu=mtu)
 
         if vrrp_ip:
             self.addresses.append({
@@ -132,102 +129,54 @@ class VIPInterfaceFile(InterfaceFile):
                 consts.GATEWAY: gateway,
                 consts.FLAGS: [consts.ONLINK]
             })
-            if topology != consts.TOPOLOGY_ACTIVE_STANDBY:
-                self.routes.append({
-                    consts.DST: (
-                        "::/0" if ip_version == 6 else "0.0.0.0/0"),
-                    consts.GATEWAY: gateway,
-                    consts.FLAGS: [consts.ONLINK],
-                    consts.TABLE: 1,
-                })
+            self.routes.append({
+                consts.DST: (
+                    "::/0" if ip_version == 6 else "0.0.0.0/0"),
+                consts.GATEWAY: gateway,
+                consts.FLAGS: [consts.ONLINK],
+                consts.TABLE: 1,
+            })
 
-        # In ACTIVE_STANDBY topology, keepalived configures the VIP address.
-        # Keep track of it in the interface file but mark it with a special
-        # flag so the amphora-interface would not add/delete
-        # keepalived-maintained things.
-        self.addresses.append({
-            consts.ADDRESS: vip,
-            consts.PREFIXLEN: 128 if ip_version == 6 else 32,
-            # OCTAVIA_OWNED = False when this address is managed by another
-            # tool (keepalived)
-            consts.OCTAVIA_OWNED: topology != consts.TOPOLOGY_ACTIVE_STANDBY
-        })
-        vip_cidr = ipaddress.ip_network(
-            "{}/{}".format(vip, prefixlen), strict=False)
-        self.routes.append({
-            consts.DST: vip_cidr.exploded,
-            consts.SCOPE: 'link',
-        })
-        if topology != consts.TOPOLOGY_ACTIVE_STANDBY:
+        # In ACTIVE_STANDBY topology, keepalived sets these addresses, routes
+        # and rules
+        if topology == consts.TOPOLOGY_SINGLE:
+            self.addresses.append({
+                consts.ADDRESS: vip,
+                consts.PREFIXLEN: prefixlen
+            })
+            vip_cidr = ipaddress.ip_network(
+                "{}/{}".format(vip, prefixlen), strict=False)
             self.routes.append({
                 consts.DST: vip_cidr.exploded,
                 consts.PREFSRC: vip,
                 consts.SCOPE: 'link',
-                consts.TABLE: 1
+                consts.TABLE: 1,
             })
             self.rules.append({
                 consts.SRC: vip,
                 consts.SRC_LEN: 128 if ip_version == 6 else 32,
-                consts.TABLE: 1
+                consts.TABLE: 1,
             })
 
         self.routes.extend(self.get_host_routes(host_routes))
         self.routes.extend(self.get_host_routes(host_routes,
                                                 table=1))
 
-        ip_versions = {ip_version}
-
-        for fixed_ip in fixed_ips or ():
-            ip_addr = fixed_ip['ip_address']
-            cidr = fixed_ip['subnet_cidr']
-            ip = ipaddress.ip_address(ip_addr)
-            network = ipaddress.ip_network(cidr)
-            prefixlen = network.prefixlen
-            self.addresses.append({
-                consts.ADDRESS: fixed_ip['ip_address'],
-                consts.PREFIXLEN: prefixlen,
-            })
-
-            ip_versions.add(ip.version)
-
-            gateway = fixed_ip.get('gateway')
-            if gateway:
-                # Add default routes if there's a gateway
-                self.routes.append({
-                    consts.DST: (
-                        "::/0" if ip.version == 6 else "0.0.0.0/0"),
-                    consts.GATEWAY: gateway,
-                    consts.FLAGS: [consts.ONLINK]
-                })
-                if topology != consts.TOPOLOGY_ACTIVE_STANDBY:
-                    self.routes.append({
-                        consts.DST: (
-                            "::/0" if ip.version == 6 else "0.0.0.0/0"),
-                        consts.GATEWAY: gateway,
-                        consts.FLAGS: [consts.ONLINK],
-                        consts.TABLE: 1,
-                    })
-
-            host_routes = self.get_host_routes(
-                fixed_ip.get('host_routes', []))
-            self.routes.extend(host_routes)
-
-        for ip_v in ip_versions:
-            self.scripts[consts.IFACE_UP].append({
-                consts.COMMAND: (
-                    "/usr/local/bin/lvs-masquerade.sh add {} {}".format(
-                        'ipv6' if ip_v == 6 else 'ipv4', name))
-            })
-            self.scripts[consts.IFACE_DOWN].append({
-                consts.COMMAND: (
-                    "/usr/local/bin/lvs-masquerade.sh delete {} {}".format(
-                        'ipv6' if ip_v == 6 else 'ipv4', name))
-            })
+        self.scripts[consts.IFACE_UP].append({
+            consts.COMMAND: (
+                "/usr/local/bin/lvs-masquerade.sh add {} {}".format(
+                    'ipv6' if ip_version == 6 else 'ipv4', name))
+        })
+        self.scripts[consts.IFACE_DOWN].append({
+            consts.COMMAND: (
+                "/usr/local/bin/lvs-masquerade.sh delete {} {}".format(
+                    'ipv6' if ip_version == 6 else 'ipv4', name))
+        })
 
 
 class PortInterfaceFile(InterfaceFile):
     def __init__(self, name, mtu, fixed_ips):
-        super().__init__(name, if_type=consts.BACKEND, mtu=mtu)
+        super().__init__(name, mtu=mtu)
 
         if fixed_ips:
             ip_versions = set()

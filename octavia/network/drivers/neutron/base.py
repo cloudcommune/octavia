@@ -18,11 +18,11 @@ from oslo_log import log as logging
 
 from octavia.common import clients
 from octavia.common import data_models
+from octavia.common import exceptions
 from octavia.i18n import _
 from octavia.network import base
 from octavia.network import data_models as network_models
 from octavia.network.drivers.neutron import utils
-
 
 LOG = logging.getLogger(__name__)
 DNS_INT_EXT_ALIAS = 'dns-integration'
@@ -180,7 +180,7 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
                       'device %s.', compute_id)
             ports = {'ports': []}
         return [self._port_to_octavia_interface(
-                compute_id, port) for port in ports['ports']]
+            compute_id, port) for port in ports['ports']]
 
     def _get_resource(self, resource_type, resource_id, context=None):
         neutron_client = self.neutron_client
@@ -276,34 +276,70 @@ class BaseNeutronDriver(base.AbstractNetworkDriver):
     def get_network_ip_availability(self, network):
         return self._get_resource('network_ip_availability', network.id)
 
-    def plug_fixed_ip(self, port_id, subnet_id, ip_address=None):
-        port = self.get_port(port_id).to_dict(recurse=True)
-        fixed_ips = port['fixed_ips']
+    def add_ecmp_routes(self, router_id, vip, nexthops):
+        router = self.neutron_client.show_router(router_id)
+        router_info = router['router']
+        routes = router_info['routes']
+        for nexthop in nexthops:
+            route = dict(destination=vip, nexthop=nexthop)
+            routes.append(route)
+        json_body = {}
+        router_body = {}
+        router_body['routes'] = routes
+        json_body['router'] = router_body
+        response = self.neutron_client.update_router(router_id, json_body)
+        return response
 
-        new_fixed_ip_dict = {'subnet_id': subnet_id}
-        if ip_address:
-            new_fixed_ip_dict['ip_address'] = ip_address
+    def del_ecmp_routes(self, router_id, vip, nexthops):
+        router = self.neutron_client.show_router(router_id)
+        router_info = router['router']
+        routes = router_info['routes']
+        for nexthop in nexthops:
+            route = dict(destination=vip, nexthop=nexthop)
+            routes.remove(route)
+        json_body = {}
+        router_body = {}
+        router_body['routes'] = routes
+        json_body['router'] = router_body
+        response = self.neutron_client.update_router(router_id, json_body)
+        return response
 
-        fixed_ips.append(new_fixed_ip_dict)
+    def get_port_by_net_id_device_owner(self, network_id, device_owner,
+                                        subnet_id, unique_item=False):
+        return self._get_resources_by_filters(
+            'port', unique_item=unique_item,
+            network_id=network_id, device_owner=device_owner,
+            fixed_ips='subnet_id=' + subnet_id)
 
-        body = {'port': {'fixed_ips': fixed_ips}}
+    def get_router_id(self, vip_network_id, vip_subnet_id):
+        """Check whether the subnet has router."""
+        port = None
+        for device_owner in ('network:router_interface',
+                             'network:router_interface_distributed',
+                             'network:ha_router_replicated_interface'):
+            try:
+                port = self.get_port_by_net_id_device_owner(
+                    vip_network_id, device_owner, vip_subnet_id,
+                    unique_item=True)
+            except base.PortNotFound:
+                LOG.info(f'route port is not found as '
+                         f'device_owner is {device_owner}, trying '
+                         f'another device_owner')
+
+        if not port:
+            raise exceptions.RouterValidationException(number='0')
+        return port.device_id
+
+    def get_port_ip(self, vip_network_id, vip_subnet_id, device_owner,
+                    unique_item=False):
+        """find port id by subnet_id and device owner."""
         try:
-            updated_port = self.neutron_client.update_port(port_id, body)
-            return utils.convert_port_dict_to_model(updated_port)
+            port = self.get_port_by_net_id_device_owner(vip_network_id,
+                                                        device_owner,
+                                                        vip_subnet_id,
+                                                        unique_item=unique_item)
         except Exception as e:
-            raise base.NetworkException(str(e))
-
-    def unplug_fixed_ip(self, port_id, subnet_id):
-        port = self.get_port(port_id)
-        fixed_ips = [
-            fixed_ip.to_dict()
-            for fixed_ip in port.fixed_ips
-            if fixed_ip.subnet_id != subnet_id
-        ]
-
-        body = {'port': {'fixed_ips': fixed_ips}}
-        try:
-            updated_port = self.neutron_client.update_port(port_id, body)
-            return utils.convert_port_dict_to_model(updated_port)
-        except Exception as e:
-            raise base.NetworkException(str(e))
+            raise exceptions.PortValidationException(number='0') from e
+        if len(port) == 0:
+            raise exceptions.MultiPortNotFindException
+        return port[0].fixed_ips[0].ip_address

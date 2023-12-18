@@ -117,10 +117,8 @@ virtual_server {{ lb_vip_address }} {{ listener.protocol_port }} {
       {% endif %}
       {% if default_pool.session_persistence.persistence_granularity %}
     persistence_granularity {{ default_pool.session_persistence.persistence_granularity }}
-      {% elif ip_version == 4 %}
-    persistence_granularity 255.255.255.255
       {% else %}
-    persistence_granularity 128
+    persistence_granularity 255.255.255.255
       {% endif %}
    {% endif %}
 {{ health_monitor_vs_macro(default_pool) }}
@@ -134,11 +132,9 @@ virtual_server {{ lb_vip_address }} {{ listener.protocol_port }} {
     {% if default_pool.health_monitor and default_pool.health_monitor.enabled %}
     # Configuration for HealthMonitor {{ default_pool.health_monitor.id }}
     {% endif %}
-    {% if default_pool.enabled %}
-      {% for member in default_pool.members %}
+    {% for member in default_pool.members %}
         {{- realserver_macro(constants, lib_consts, default_pool, member, listener) }}
-      {% endfor %}
-    {% endif %}
+    {% endfor %}
 {% endif %}
 }
 {% endif %}

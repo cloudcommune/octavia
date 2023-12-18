@@ -5,6 +5,7 @@
       - check-requirements
       - periodic-stable-jobs-neutron
       - openstack-cover-jobs
+      - openstack-lower-constraints-jobs
       - openstack-python3-yoga-jobs
       - publish-openstack-docs-pti
       - release-notes-jobs-python3
@@ -73,9 +74,9 @@
         - octavia-v2-dsvm-scenario-centos-8-stream:
             irrelevant-files: *irrelevant-files
             voting: false
-    queue: octavia
     gate:
       fail-fast: true
+      queue: octavia
       jobs:
         - openstack-tox-pip-check-reqs:
             irrelevant-files:

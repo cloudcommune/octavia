@@ -190,3 +190,7 @@ class LoadBalancerStatisticsResponse(BaseLoadBalancerType):
 
 class StatisticsRootResponse(types.BaseType):
     stats = wtypes.wsattr(LoadBalancerStatisticsResponse)
+
+
+class ResizeRootPUT(types.BaseType):
+    flavor_id = wtypes.wsattr(wtypes.UuidType())

@@ -131,10 +131,17 @@ class JinjaTemplater(object):
         #               Currently it either throws an error or just fails
         #               to log the message.
         if protocol not in constants.HAPROXY_HTTP_PROTOCOLS:
-            log_format = log_format.replace('%{+Q}r', '-')
-            log_format = log_format.replace('%r', '-')
             log_format = log_format.replace('%{+Q}ST', '-')
             log_format = log_format.replace('%ST', '-')
+            # replace all http dedicated variables with dash
+            http_dedicated_variables = ['%{+Q}CC', '%CC', '%{+Q}CS', '%CS',
+                                        '%{+Q}HM', '%HM', '%{+Q}HP', '%HP',
+                                        '%{+Q}HQ', '%HQ', '%{+Q}HU', '%HU',
+                                        '%{+Q}HV', '%HV', '%Ta', '%Ti', '%TR', '%Tr',
+                                        '%Tq', '%{+Q}r', '%r',
+                                        '%tr', '%trg', '%trl', '%{+Q}tsc', '%tsc']
+            for v in http_dedicated_variables:
+                log_format = log_format.replace(v, '-')
 
         log_format = log_format.replace(' ', '\\ ')
         return log_format

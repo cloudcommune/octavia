@@ -353,10 +353,8 @@ class TestServerTestCase(base.TestCase):
     @mock.patch('octavia.amphorae.backends.agent.api_server.loadbalancer.'
                 'Loadbalancer._check_haproxy_status')
     @mock.patch('subprocess.check_output')
-    @mock.patch('octavia.amphorae.backends.utils.haproxy_query.HAProxyQuery')
-    def _test_reload(self, distro, mock_haproxy_query, mock_subprocess,
-                     mock_haproxy_status, mock_vrrp, mock_exists,
-                     mock_listdir):
+    def _test_reload(self, distro, mock_subprocess, mock_haproxy_status,
+                     mock_vrrp, mock_exists, mock_listdir):
 
         self.assertIn(distro, [consts.UBUNTU, consts.CENTOS])
 
@@ -969,12 +967,10 @@ class TestServerTestCase(base.TestCase):
     @mock.patch('subprocess.check_output')
     @mock.patch('octavia.amphorae.backends.agent.api_server.'
                 'plug.Plug._netns_interface_exists')
-    @mock.patch('octavia.amphorae.backends.agent.api_server.'
-                'plug.Plug._netns_interface_by_mac')
     @mock.patch('os.path.isfile')
-    def _test_plug_network(self, distro, mock_isfile, mock_int_by_mac,
-                           mock_int_exists, mock_check_output, mock_netns,
-                           mock_pyroute2, mock_os_chmod):
+    def _test_plug_network(self, distro, mock_isfile, mock_int_exists,
+                           mock_check_output, mock_netns, mock_pyroute2,
+                           mock_os_chmod):
         mock_ipr = mock.MagicMock()
         mock_ipr_instance = mock.MagicMock()
         mock_ipr_instance.link_lookup.side_effect = [
@@ -990,14 +986,27 @@ class TestServerTestCase(base.TestCase):
 
         mock_int_exists.return_value = False
         netns_handle = mock_netns.return_value.__enter__.return_value
-        netns_handle.get_links.return_value = [
-            {'attrs': [['IFLA_IFNAME', f'eth{idx}']]}
-            for idx in range(test_int_num)]
+        netns_handle.get_links.return_value = [0] * test_int_num
         mock_isfile.return_value = True
 
-        mock_check_output.return_value = b"1\n2\n3\n"
-
         test_int_num = str(test_int_num)
+
+        # Interface already plugged
+        mock_int_exists.return_value = True
+        if distro == consts.UBUNTU:
+            rv = self.ubuntu_app.post('/' + api_server.VERSION +
+                                      "/plug/network",
+                                      content_type='application/json',
+                                      data=jsonutils.dumps(port_info))
+        elif distro == consts.CENTOS:
+            rv = self.centos_app.post('/' + api_server.VERSION +
+                                      "/plug/network",
+                                      content_type='application/json',
+                                      data=jsonutils.dumps(port_info))
+        self.assertEqual(409, rv.status_code)
+        self.assertEqual(dict(message="Interface already exists"),
+                         jsonutils.loads(rv.data.decode('utf-8')))
+        mock_int_exists.return_value = False
 
         # No interface at all
         file_name = '/sys/bus/pci/rescan'
@@ -1380,7 +1389,7 @@ class TestServerTestCase(base.TestCase):
 
         netns_handle = mock_netns.return_value.__enter__.return_value
         netns_handle.get_links.return_value = [{
-            'attrs': [['IFLA_IFNAME', 'eth2']]}]
+            'attrs': [['IFLA_IFNAME', consts.NETNS_PRIMARY_INTERFACE]]}]
 
         port_info = {'mac_address': MAC, 'mtu': 1450, 'fixed_ips': [
             {'ip_address': IP, 'subnet_cidr': SUBNET_CIDR,
@@ -1389,7 +1398,8 @@ class TestServerTestCase(base.TestCase):
 
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
         mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
-        file_name = '/etc/octavia/interfaces/eth3.json'
+        file_name = '/etc/octavia/interfaces/{}.json'.format(
+            consts.NETNS_PRIMARY_INTERFACE)
 
         m = self.useFixture(test_utils.OpenFixture(file_name)).mock_open
         with mock.patch('os.open') as mock_open, mock.patch.object(
@@ -1419,7 +1429,7 @@ class TestServerTestCase(base.TestCase):
             mock_fdopen.assert_any_call(123, 'r+')
 
             expected_dict = {
-                consts.NAME: 'eth3',
+                consts.NAME: consts.NETNS_PRIMARY_INTERFACE,
                 consts.MTU: 1450,
                 consts.ADDRESSES: [
                     {
@@ -1441,12 +1451,13 @@ class TestServerTestCase(base.TestCase):
                 consts.SCRIPTS: {
                     consts.IFACE_UP: [{
                         consts.COMMAND: (
-                            "/usr/local/bin/lvs-masquerade.sh add ipv4 eth3")
+                            "/usr/local/bin/lvs-masquerade.sh add ipv4 "
+                            "{}".format(consts.NETNS_PRIMARY_INTERFACE))
                     }],
                     consts.IFACE_DOWN: [{
                         consts.COMMAND: (
                             "/usr/local/bin/lvs-masquerade.sh delete ipv4 "
-                            "eth3")
+                            "{}".format(consts.NETNS_PRIMARY_INTERFACE))
                     }]
                 }
             }
@@ -1458,7 +1469,8 @@ class TestServerTestCase(base.TestCase):
 
             mock_check_output.assert_called_with(
                 ['ip', 'netns', 'exec', consts.AMPHORA_NAMESPACE,
-                 'amphora-interface', 'up', 'eth3'], stderr=-2)
+                 'amphora-interface', 'up',
+                 consts.NETNS_PRIMARY_INTERFACE], stderr=-2)
 
     def test_ubuntu_plug_VIP4(self):
         self._test_plug_VIP4(consts.UBUNTU)
@@ -1647,7 +1659,7 @@ class TestServerTestCase(base.TestCase):
                         consts.PREFIXLEN: 24
                     }, {
                         consts.ADDRESS: "203.0.113.2",
-                        consts.PREFIXLEN: 32
+                        consts.PREFIXLEN: 24
                     }
                 ],
                 consts.ROUTES: [
@@ -1660,9 +1672,6 @@ class TestServerTestCase(base.TestCase):
                         consts.GATEWAY: '203.0.113.1',
                         consts.TABLE: 1,
                         consts.FLAGS: [consts.ONLINK]
-                    }, {
-                        consts.DST: '203.0.113.0/24',
-                        consts.SCOPE: 'link'
                     }, {
                         consts.DST: '203.0.113.0/24',
                         consts.PREFSRC: '203.0.113.2',
@@ -1774,7 +1783,7 @@ class TestServerTestCase(base.TestCase):
                         consts.DHCP: True
                     }, {
                         consts.ADDRESS: "203.0.113.2",
-                        consts.PREFIXLEN: 32
+                        consts.PREFIXLEN: 24
                     }
                 ],
                 consts.ROUTES: [
@@ -1787,9 +1796,6 @@ class TestServerTestCase(base.TestCase):
                         consts.GATEWAY: '203.0.113.1',
                         consts.FLAGS: [consts.ONLINK],
                         consts.TABLE: 1
-                    }, {
-                        consts.DST: '203.0.113.0/24',
-                        consts.SCOPE: 'link'
                     }, {
                         consts.DST: '203.0.113.0/24',
                         consts.PREFSRC: '203.0.113.2',
@@ -1829,6 +1835,7 @@ class TestServerTestCase(base.TestCase):
                  consts.NETNS_PRIMARY_INTERFACE], stderr=-2)
 
         mock_check_output.side_effect = [
+            'unplug1',
             subprocess.CalledProcessError(
                 7, 'test', RANDOM_ERROR), subprocess.CalledProcessError(
                 7, 'test', RANDOM_ERROR)]
@@ -2017,7 +2024,7 @@ class TestServerTestCase(base.TestCase):
                         consts.PREFIXLEN: 32
                     }, {
                         consts.ADDRESS: '2001:0db8::2',
-                        consts.PREFIXLEN: 128
+                        consts.PREFIXLEN: 32
                     }
                 ],
                 consts.ROUTES: [
@@ -2030,9 +2037,6 @@ class TestServerTestCase(base.TestCase):
                         consts.GATEWAY: '2001:db8::1',
                         consts.FLAGS: [consts.ONLINK],
                         consts.TABLE: 1
-                    }, {
-                        consts.DST: '2001:0db8::/32',
-                        consts.SCOPE: 'link'
                     }, {
                         consts.DST: '2001:0db8::/32',
                         consts.PREFSRC: '2001:0db8::2',
@@ -2141,7 +2145,7 @@ class TestServerTestCase(base.TestCase):
                     },
                     {
                         consts.ADDRESS: '2001:db8::2',
-                        consts.PREFIXLEN: 128
+                        consts.PREFIXLEN: 32
                     }
                 ],
                 consts.ROUTES: [
@@ -2154,9 +2158,6 @@ class TestServerTestCase(base.TestCase):
                         consts.GATEWAY: '2001:db8::1',
                         consts.FLAGS: [consts.ONLINK],
                         consts.TABLE: 1
-                    }, {
-                        consts.DST: '2001:db8::/32',
-                        consts.SCOPE: 'link'
                     }, {
                         consts.DST: '2001:db8::/32',
                         consts.PREFSRC: '2001:db8::2',
@@ -2195,6 +2196,7 @@ class TestServerTestCase(base.TestCase):
                     'amphora-interface', 'up', '{netns_int}'.format(
                         netns_int=consts.NETNS_PRIMARY_INTERFACE)], stderr=-2)
         mock_check_output.side_effect = [
+            'unplug1',
             subprocess.CalledProcessError(
                 7, 'test', RANDOM_ERROR), subprocess.CalledProcessError(
                 7, 'test', RANDOM_ERROR)]

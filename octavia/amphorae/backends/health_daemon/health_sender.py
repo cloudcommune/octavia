@@ -70,8 +70,6 @@ class UDPStatusSender(object):
         for ipport in CONF.health_manager.controller_ip_port_list:
             try:
                 ip, port = ipport.rsplit(':', 1)
-                if ip and ip[0] == '[' and ip[-1] == ']':
-                    ip = ip[1:-1]
             except ValueError:
                 LOG.error("Invalid ip and port '%s' in health_manager "
                           "controller_ip_port_list", ipport)

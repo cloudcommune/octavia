@@ -1871,8 +1871,8 @@ class TestPool(base.BaseAPITest):
         self.assertTrue(api_pool['tls_enabled'])
         self.assertCountEqual(tls_versions,
                               api_pool['tls_versions'])
-
         new_pool = {'tls_versions': [lib_constants.TLS_VERSION_1_3]}
+
         self.put(self.POOL_PATH.format(pool_id=api_pool.get('id')),
                  self._build_body(new_pool))
         self.assert_correct_status(
@@ -1884,7 +1884,9 @@ class TestPool(base.BaseAPITest):
         self.set_lb_status(self.lb_id)
         response = self.get(self.POOL_PATH.format(
             pool_id=api_pool.get('id'))).json.get(self.root_tag)
+
         self.assertCountEqual([lib_constants.TLS_VERSION_1_3],
+
                               response['tls_versions'])
         self.assertIsNotNone(response.get('created_at'))
         self.assertIsNotNone(response.get('updated_at'))
@@ -1893,13 +1895,16 @@ class TestPool(base.BaseAPITest):
             pool_id=response.get('id'))
 
     def test_update_with_empty_tls_versions(self):
+
         default_pool_tls_versions = [lib_constants.TLS_VERSION_1_3,
                                      lib_constants.TLS_VERSION_1_2]
+
         self.conf = self.useFixture(oslo_fixture.Config(cfg.CONF))
         self.conf.config(group='api_settings',
                          default_pool_tls_versions=default_pool_tls_versions)
 
         tls_versions = [lib_constants.TLS_VERSION_1_3]
+
         api_pool = self.create_pool(
             self.lb_id,
             constants.PROTOCOL_HTTP,
@@ -2706,24 +2711,3 @@ class TestPool(base.BaseAPITest):
             'Invalid input for field/attribute alpn_protocols', fault)
         self.assertIn('Value should be a valid ALPN protocol ID', fault)
         self.assert_correct_status(lb_id=self.lb_id)
-
-    @mock.patch("octavia.api.drivers.noop_driver.driver.NoopManager."
-                "pool_update")
-    def test_update_with_exception_in_provider_driver(self, pool_update_mock):
-        pool_update_mock.side_effect = Exception("Provider error")
-
-        api_pool = self.create_pool(
-            self.lb_id,
-            constants.PROTOCOL_HTTP,
-            constants.LB_ALGORITHM_ROUND_ROBIN,
-            listener_id=self.listener_id).get(self.root_tag)
-        self.set_lb_status(lb_id=self.lb_id)
-
-        new_pool = {'name': 'foo'}
-        self.put(self.POOL_PATH.format(pool_id=api_pool.get('id')),
-                 self._build_body(new_pool), status=500)
-
-        lb = self.get(self.LB_PATH.format(lb_id=self.lb_id)).json.get(
-            "loadbalancer")
-        self.assertEqual(lb[constants.PROVISIONING_STATUS],
-                         constants.ACTIVE)

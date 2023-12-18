@@ -146,11 +146,11 @@ class PoolsController(base.BaseController):
                 listener_id=listener_id)
         except odb_exceptions.DBDuplicateEntry as e:
             raise exceptions.IDAlreadyExists() from e
-        except odb_exceptions.DBReferenceError as e:
-            raise exceptions.InvalidOption(value=pool_dict.get(e.key),
-                                           option=e.key) from e
         except odb_exceptions.DBError as e:
-            raise exceptions.APIException() from e
+            # TODO(blogan): will have to do separate validation protocol
+            # before creation or update since the exception messages
+            # do not give any information as to what constraint failed
+            raise exceptions.InvalidOption(value='', option='') from e
 
     def _is_only_specified_in_request(self, request, **kwargs):
         request_attrs = []
@@ -460,7 +460,7 @@ class PoolsController(base.BaseController):
 
         with db_api.get_lock_session() as lock_session:
             self._test_lb_and_listener_statuses(
-                lock_session, lb_id=db_pool.load_balancer_id,
+                context.session, lb_id=db_pool.load_balancer_id,
                 listener_ids=self._get_affected_listener_ids(db_pool))
 
             # Prepare the data for the driver data model

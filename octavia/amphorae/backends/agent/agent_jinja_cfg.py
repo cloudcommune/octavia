@@ -34,7 +34,7 @@ class AgentJinjaTemplater(object):
         self.agent_template = jinja_env.get_template(
             constants.AGENT_CONF_TEMPLATE)
 
-    def build_agent_config(self, amphora_id, topology):
+    def build_agent_config(self, amphora_id, topology, gateway_ip=None):
         return self.agent_template.render(
             {'agent_server_ca': CONF.amphora_agent.agent_server_ca,
              'agent_server_cert': CONF.amphora_agent.agent_server_cert,
@@ -60,4 +60,6 @@ class AgentJinjaTemplater(object):
              'topology': topology,
              'administrative_log_facility':
                  CONF.amphora_agent.administrative_log_facility,
-             'user_log_facility': CONF.amphora_agent.user_log_facility})
+             'user_log_facility': CONF.amphora_agent.user_log_facility,
+             'gateway_ip': gateway_ip
+             })

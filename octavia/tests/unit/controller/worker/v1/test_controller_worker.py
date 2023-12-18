@@ -22,6 +22,7 @@ from octavia.common import base_taskflow
 from octavia.common import constants
 from octavia.common import data_models
 from octavia.common import exceptions
+from octavia.common import rpc
 from octavia.controller.worker.v1 import controller_worker
 import octavia.tests.unit.base as base
 
@@ -64,6 +65,8 @@ _amphora_mock.id = AMP_ID
 _db_session = mock.MagicMock()
 
 CONF = cfg.CONF
+# mock rpc
+rpc.notify_about_octavia_info = mock.MagicMock(return_value=None)
 
 
 class TestException(Exception):
@@ -483,6 +486,51 @@ class TestControllerWorker(base.TestCase):
         mock_eng.run.assert_any_call()
 
     @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
+                'LoadBalancerFlows.get_create_load_balancer_flow',
+                return_value=_flow_mock)
+    def test_create_load_balancer_multi_active(
+            self,
+            mock_get_create_load_balancer_flow,
+            mock_api_get_session,
+            mock_dyn_log_listener,
+            mock_taskflow_load,
+            mock_pool_repo_get,
+            mock_member_repo_get,
+            mock_l7rule_repo_get,
+            mock_l7policy_repo_get,
+            mock_listener_repo_get,
+            mock_lb_repo_get,
+            mock_health_mon_repo_get,
+            mock_amp_repo_get):
+        self.conf.config(
+            group="controller_worker",
+            loadbalancer_topology=constants.TOPOLOGY_MULTI_ACTIVE)
+
+        _flow_mock.reset_mock()
+        mock_taskflow_load.reset_mock()
+        mock_eng = mock.Mock()
+        mock_taskflow_load.return_value = mock_eng
+        store = {
+            constants.LOADBALANCER_ID: LB_ID,
+            'update_dict': {'topology': constants.TOPOLOGY_MULTI_ACTIVE},
+            constants.BUILD_TYPE_PRIORITY: constants.LB_CREATE_NORMAL_PRIORITY,
+            constants.FLAVOR: None, constants.SERVER_GROUP_ID: None,
+            constants.AVAILABILITY_ZONE: None,
+        }
+        setattr(mock_lb_repo_get.return_value, 'topology',
+                constants.TOPOLOGY_MULTI_ACTIVE)
+        setattr(mock_lb_repo_get.return_value, 'listeners', [])
+
+        cw = controller_worker.ControllerWorker()
+        cw.create_load_balancer(LB_ID)
+
+        mock_get_create_load_balancer_flow.assert_called_with(
+            topology=constants.TOPOLOGY_MULTI_ACTIVE, listeners=[])
+        mock_taskflow_load.assert_called_with(
+            mock_get_create_load_balancer_flow.return_value, store=store)
+        mock_eng.run.assert_any_call()
+
+    @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
                 'LoadBalancerFlows.get_create_load_balancer_flow')
     def test_create_load_balancer_full_graph_single(
             self,
@@ -582,6 +630,60 @@ class TestControllerWorker(base.TestCase):
         mock_eng.run.assert_any_call()
 
     @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
+                'LoadBalancerFlows.get_create_load_balancer_flow')
+    @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
+                'LoadBalancerFlows._create_single_topology')
+    @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
+                'LoadBalancerFlows._create_active_standby_topology')
+    @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
+                'LoadBalancerFlows._create_multi_active_topology')
+    def test_create_load_balancer_full_graph_multi_type(
+            self,
+            mock_create_active_standby_topology,
+            mock_create_single_topology,
+            mock_create_multi_active_topology,
+            mock_get_create_load_balancer_flow,
+            mock_api_get_session,
+            mock_dyn_log_listener,
+            mock_taskflow_load,
+            mock_pool_repo_get,
+            mock_member_repo_get,
+            mock_l7rule_repo_get,
+            mock_l7policy_repo_get,
+            mock_listener_repo_get,
+            mock_lb_repo_get,
+            mock_health_mon_repo_get,
+            mock_amp_repo_get):
+        self.conf.config(
+            group="controller_worker",
+            loadbalancer_topology=constants.TOPOLOGY_MULTI_ACTIVE)
+
+        listeners = [data_models.Listener(id='listener1'),
+                     data_models.Listener(id='listener2')]
+        lb = data_models.LoadBalancer(
+            id=LB_ID, listeners=listeners,
+            topology=constants.TOPOLOGY_MULTI_ACTIVE)
+        mock_lb_repo_get.return_value = lb
+        mock_eng = mock.Mock()
+        mock_taskflow_load.return_value = mock_eng
+        store = {
+            constants.LOADBALANCER_ID: LB_ID,
+            'update_dict': {'topology': constants.TOPOLOGY_MULTI_ACTIVE},
+            constants.BUILD_TYPE_PRIORITY: constants.LB_CREATE_NORMAL_PRIORITY,
+            constants.FLAVOR: None, constants.SERVER_GROUP_ID: None,
+            constants.AVAILABILITY_ZONE: None,
+        }
+
+        cw = controller_worker.ControllerWorker()
+        cw.create_load_balancer(LB_ID)
+
+        mock_get_create_load_balancer_flow.assert_called_with(
+            topology=constants.TOPOLOGY_MULTI_ACTIVE, listeners=lb.listeners)
+        mock_taskflow_load.assert_called_with(
+            mock_get_create_load_balancer_flow.return_value, store=store)
+        mock_eng.run.assert_any_call()
+
+    @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
                 'LoadBalancerFlows.get_delete_load_balancer_flow',
                 return_value=(_flow_mock, {'test': 'test'}))
     def test_delete_load_balancer_without_cascade(self,
@@ -613,7 +715,8 @@ class TestControllerWorker(base.TestCase):
                                            _load_balancer_mock,
                                            constants.SERVER_GROUP_ID:
                                            _load_balancer_mock.server_group_id,
-                                           'test': 'test'
+                                           'test': 'test',
+                                           constants.LOADBALANCER_ID: LB_ID
                                            }
                                     )
          )
@@ -651,7 +754,9 @@ class TestControllerWorker(base.TestCase):
                                            _load_balancer_mock,
                                            constants.SERVER_GROUP_ID:
                                            _load_balancer_mock.server_group_id,
-                                           'test': 'test'
+                                           'test': 'test',
+                                           constants.LOADBALANCER_ID:
+                                               LB_ID
                                            }
                                     )
          )
@@ -731,7 +836,6 @@ class TestControllerWorker(base.TestCase):
                 store={constants.MEMBER: _member_mock,
                        constants.LISTENERS: [_listener_mock],
                        constants.LOADBALANCER: _load_balancer_mock,
-                       constants.LOADBALANCER_ID: _load_balancer_mock.id,
                        constants.POOL: _pool_mock,
                        constants.AVAILABILITY_ZONE: {}}))
 
@@ -770,8 +874,6 @@ class TestControllerWorker(base.TestCase):
                                        [_listener_mock],
                                    constants.LOADBALANCER:
                                        _load_balancer_mock,
-                                   constants.LOADBALANCER_ID:
-                                       _load_balancer_mock.id,
                                    constants.POOL:
                                        _pool_mock,
                                    constants.AVAILABILITY_ZONE: {}}))
@@ -852,8 +954,6 @@ class TestControllerWorker(base.TestCase):
                                         constants.LISTENERS: [_listener_mock],
                                         constants.LOADBALANCER:
                                             _load_balancer_mock,
-                                        constants.LOADBALANCER_ID:
-                                            _load_balancer_mock.id,
                                         constants.POOL: _pool_mock,
                                         constants.AVAILABILITY_ZONE: {}}))
 
@@ -1276,6 +1376,60 @@ class TestControllerWorker(base.TestCase):
                 'amphora_flows.AmphoraFlows.get_failover_amphora_flow',
                 return_value=_flow_mock)
     @mock.patch('octavia.db.repositories.LoadBalancerRepository.update')
+    def test_failover_amphora_lb_multi_active(self,
+                                              mock_update,
+                                              mock_get_failover_flow,
+                                              mock_get_flavor_meta,
+                                              mock_get_az_meta,
+                                              mock_api_get_session,
+                                              mock_dyn_log_listener,
+                                              mock_taskflow_load,
+                                              mock_pool_repo_get,
+                                              mock_member_repo_get,
+                                              mock_l7rule_repo_get,
+                                              mock_l7policy_repo_get,
+                                              mock_listener_repo_get,
+                                              mock_lb_repo_get,
+                                              mock_health_mon_repo_get,
+                                              mock_amp_repo_get):
+        _flow_mock.reset_mock()
+        load_balancer_mock = mock.MagicMock()
+        load_balancer_mock.listeners = [_listener_mock]
+        load_balancer_mock.topology = constants.TOPOLOGY_MULTI_ACTIVE
+        load_balancer_mock.flavor_id = None
+        load_balancer_mock.availability_zone = None
+        load_balancer_mock.vip = _vip_mock
+
+        mock_lb_repo_get.return_value = load_balancer_mock
+
+        cw = controller_worker.ControllerWorker()
+        cw.failover_amphora(AMP_ID)
+
+        (base_taskflow.BaseTaskFlowEngine.taskflow_load.
+            assert_called_once_with(
+                _flow_mock,
+                store={constants.FLAVOR: {'loadbalancer_topology':
+                                          load_balancer_mock.topology},
+                       constants.LOADBALANCER: load_balancer_mock,
+                       constants.LOADBALANCER_ID: load_balancer_mock.id,
+                       constants.BUILD_TYPE_PRIORITY:
+                       constants.LB_CREATE_FAILOVER_PRIORITY,
+                       constants.AVAILABILITY_ZONE: {},
+                       constants.SERVER_GROUP_ID:
+                       load_balancer_mock.server_group_id,
+                       constants.VIP: load_balancer_mock.vip
+                       }))
+
+        _flow_mock.run.assert_called_once_with()
+
+    @mock.patch('octavia.db.repositories.AvailabilityZoneRepository.'
+                'get_availability_zone_metadata_dict', return_value={})
+    @mock.patch('octavia.db.repositories.FlavorRepository.'
+                'get_flavor_metadata_dict', return_value={})
+    @mock.patch('octavia.controller.worker.v1.flows.'
+                'amphora_flows.AmphoraFlows.get_failover_amphora_flow',
+                return_value=_flow_mock)
+    @mock.patch('octavia.db.repositories.LoadBalancerRepository.update')
     def test_failover_amphora_unknown_topology(self,
                                                mock_update,
                                                mock_get_failover_flow,
@@ -1647,6 +1801,48 @@ class TestControllerWorker(base.TestCase):
                           backup_amphora_mock], result)
 
     @mock.patch('octavia.common.utils.get_amphora_driver')
+    def test_get_amphorae_for_failover_multi_active(self,
+                                                    mock_get_amp_driver,
+                                                    mock_api_get_session,
+                                                    mock_dyn_log_listener,
+                                                    mock_taskflow_load,
+                                                    mock_pool_repo_get,
+                                                    mock_member_repo_get,
+                                                    mock_l7rule_repo_get,
+                                                    mock_l7policy_repo_get,
+                                                    mock_listener_repo_get,
+                                                    mock_lb_repo_get,
+                                                    mock_health_mon_repo_get,
+                                                    mock_amp_repo_get):
+        # Note: This test uses three amphora even though we only have
+        #       two per load balancer to properly test the ordering from
+        #       this method.
+        amp_driver_mock = mock.MagicMock()
+        amp_driver_mock.get_interface_from_ip.side_effect = [
+            'fake0', None, 'fake1']
+        mock_get_amp_driver.return_value = amp_driver_mock
+        backup_amphora_mock = mock.MagicMock()
+        backup_amphora_mock.status = constants.AMPHORA_ALLOCATED
+        deleted_amphora_mock = mock.MagicMock()
+        deleted_amphora_mock.status = constants.DELETED
+        master_amphora_mock = mock.MagicMock()
+        master_amphora_mock.status = constants.AMPHORA_ALLOCATED
+        bogus_amphora_mock = mock.MagicMock()
+        bogus_amphora_mock.status = constants.AMPHORA_ALLOCATED
+
+        load_balancer_mock = mock.MagicMock()
+        load_balancer_mock.topology = constants.TOPOLOGY_MULTI_ACTIVE
+        load_balancer_mock.amphorae = [
+            master_amphora_mock, deleted_amphora_mock, backup_amphora_mock,
+            bogus_amphora_mock]
+
+        cw = controller_worker.ControllerWorker()
+        result = cw._get_amphorae_for_failover(load_balancer_mock)
+
+        self.assertEqual([master_amphora_mock, backup_amphora_mock,
+                          bogus_amphora_mock], result)
+
+    @mock.patch('octavia.common.utils.get_amphora_driver')
     def test_get_amphorae_for_failover_act_stdby_net_split(
             self, mock_get_amp_driver, mock_api_get_session,
             mock_dyn_log_listener, mock_taskflow_load, mock_pool_repo_get,
@@ -1788,6 +1984,60 @@ class TestControllerWorker(base.TestCase):
                                    load_balancer_mock.id,
                                constants.SERVER_GROUP_ID:
                                    load_balancer_mock.server_group_id,
+                               constants.FLAVOR: expected_flavor,
+                               constants.AVAILABILITY_ZONE: {}}
+
+        cw = controller_worker.ControllerWorker()
+        cw.failover_loadbalancer(LB_ID)
+
+        mock_lb_repo_get.assert_called_once_with(_db_session, id=LB_ID)
+        mock_get_amps_for_failover.assert_called_once_with(load_balancer_mock)
+        mock_get_failover_lb_flow.assert_called_once_with(
+            [_amphora_mock, _amphora_mock], load_balancer_mock)
+        mock_taskflow_load.assert_called_once_with(FAKE_FLOW,
+                                                   store=expected_flow_store)
+        _flow_mock.run.assert_called_once_with()
+
+    @mock.patch('octavia.controller.worker.v1.flows.load_balancer_flows.'
+                'LoadBalancerFlows.get_failover_LB_flow')
+    @mock.patch('octavia.controller.worker.v1.controller_worker.'
+                'ControllerWorker._get_amphorae_for_failover')
+    def test_failover_loadbalancer_multi_active(self,
+                                                mock_get_amps_for_failover,
+                                                mock_get_failover_lb_flow,
+                                                mock_api_get_session,
+                                                mock_dyn_log_listener,
+                                                mock_taskflow_load,
+                                                mock_pool_repo_get,
+                                                mock_member_repo_get,
+                                                mock_l7rule_repo_get,
+                                                mock_l7policy_repo_get,
+                                                mock_listener_repo_get,
+                                                mock_lb_repo_get,
+                                                mock_health_mon_repo_get,
+                                                mock_amp_repo_get):
+        FAKE_FLOW = 'FAKE_FLOW'
+        _flow_mock.reset_mock()
+        load_balancer_mock = mock.MagicMock()
+        load_balancer_mock.listeners = [_listener_mock]
+        load_balancer_mock.topology = constants.TOPOLOGY_MULTI_ACTIVE
+        load_balancer_mock.flavor_id = None
+        load_balancer_mock.availability_zone = None
+        load_balancer_mock.vip = _vip_mock
+        mock_lb_repo_get.return_value = load_balancer_mock
+        mock_get_amps_for_failover.return_value = [_amphora_mock,
+                                                   _amphora_mock]
+        mock_get_failover_lb_flow.return_value = FAKE_FLOW
+
+        expected_flavor = {constants.LOADBALANCER_TOPOLOGY:
+                           load_balancer_mock.topology}
+        expected_flow_store = {constants.LOADBALANCER: load_balancer_mock,
+                               constants.BUILD_TYPE_PRIORITY:
+                                   constants.LB_CREATE_FAILOVER_PRIORITY,
+                               constants.SERVER_GROUP_ID:
+                                   load_balancer_mock.server_group_id,
+                               constants.LOADBALANCER_ID:
+                                   load_balancer_mock.id,
                                constants.FLAVOR: expected_flavor,
                                constants.AVAILABILITY_ZONE: {}}
 

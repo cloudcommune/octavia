@@ -404,7 +404,7 @@ class TestComputeTasks(base.TestCase):
             config_drive_files={
                 '/etc/rsyslog.d/10-rsyslog.conf': 'FAKE CFG',
                 '/etc/octavia/certs/server.pem': fer.decrypt(
-                    test_cert.encode('utf-8')).decode('utf-8'),
+                    test_cert.encode('utf-8')),
                 '/etc/octavia/certs/client_ca.pem': 'test',
                 '/etc/octavia/amphora-agent.conf': 'test_conf'},
             server_group_id=SERVER_GRPOUP_ID,
@@ -451,7 +451,7 @@ class TestComputeTasks(base.TestCase):
 
         mock_driver.get_amphora.return_value = _db_amphora_mock, None
 
-        computewait = compute_tasks.ComputeWait()
+        computewait = compute_tasks.ComputeActiveWait()
 
         # Test with no AZ
         computewait.execute(COMPUTE_ID, AMPHORA_ID, None)
@@ -486,7 +486,7 @@ class TestComputeTasks(base.TestCase):
 
         mock_driver.get_amphora.return_value = _db_amphora_mock, None
 
-        computewait = compute_tasks.ComputeWait()
+        computewait = compute_tasks.ComputeActiveWait()
         computewait.execute(COMPUTE_ID, AMPHORA_ID, None)
 
         mock_driver.get_amphora.assert_called_once_with(COMPUTE_ID, None)
@@ -511,7 +511,7 @@ class TestComputeTasks(base.TestCase):
 
         mock_driver.get_amphora.return_value = _db_amphora_mock, None
 
-        computewait = compute_tasks.ComputeWait()
+        computewait = compute_tasks.ComputeActiveWait()
         computewait.execute(COMPUTE_ID, AMPHORA_ID, None)
 
         mock_driver.get_amphora.assert_called_once_with(COMPUTE_ID, None)

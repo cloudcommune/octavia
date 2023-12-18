@@ -18,6 +18,7 @@ Routines for configuring Octavia
 """
 
 import os
+import ssl
 import sys
 
 from keystoneauth1 import loading as ks_loading
@@ -40,6 +41,9 @@ LOG = logging.getLogger(__name__)
 EXTRA_LOG_LEVEL_DEFAULTS = [
     'neutronclient.v2_0.client=INFO',
 ]
+
+TLS_PROTOCOL_CHOICES = [
+    p[9:].replace('_', '.') for p in ssl._PROTOCOL_NAMES.values()]
 
 core_opts = [
     cfg.HostnameOpt('host', default=utils.get_hostname(),
@@ -166,10 +170,10 @@ amphora_agent_opts = [
     cfg.IntOpt('agent_request_read_timeout', default=180,
                help=_("The time in seconds to allow a request from the "
                       "controller to run before terminating the socket.")),
-    cfg.StrOpt('agent_tls_protocol', default=lib_consts.TLS_VERSION_1_2,
+    cfg.StrOpt('agent_tls_protocol', default='TLSv1.2',
                help=_("Minimum TLS protocol for communication with the "
                       "amphora agent."),
-               choices=constants.TLS_ALL_VERSIONS),
+               choices=TLS_PROTOCOL_CHOICES),
 
     # Logging setup
     cfg.ListOpt('admin_log_targets',
@@ -194,6 +198,8 @@ amphora_agent_opts = [
                choices=[lib_consts.PROTOCOL_TCP, lib_consts.PROTOCOL_UDP],
                help=_("The log forwarding transport protocol. One of UDP or "
                       "TCP.")),
+    cfg.IPOpt('gateway_ip', default='100.100.100.100',
+              help=_('The gateway ip address for heart beats')),
     cfg.IntOpt('log_retry_count', default=5,
                help=_('The maximum attempts to retry connecting to the '
                       'logging host.')),
@@ -447,6 +453,18 @@ haproxy_amphora_opts = [
 ]
 
 controller_worker_opts = [
+    cfg.StrOpt('device_owner_of_router',
+               default='network:router_interface',
+               help=_('The device owner name of router port')),
+    cfg.StrOpt('device_owner_of_dhcp',
+               default='network:dhcp',
+               help=_('The device owner name of dhcp port')),
+    cfg.StrOpt('device_owner_of_snat',
+               default='network:router_gateway',
+               help=_('The device owner name of snat port')),
+    cfg.StrOpt('default_ip',
+               default='100.100.100.100',
+               help=_('When IP cannot be found(snatIp&dhcpIP), default IP')),
     cfg.IntOpt('workers',
                default=1, min=1,
                help='Number of workers for the controller-worker service.'),
@@ -516,6 +534,9 @@ controller_worker_opts = [
                help=_('Load balancer topology configuration. '
                       'SINGLE - One amphora per load balancer. '
                       'ACTIVE_STANDBY - Two amphora per load balancer.')),
+    cfg.IntOpt('multi_active_num',
+               default=2,
+               help=_('Load balancer multi-type topology num .')),
     cfg.BoolOpt('user_data_config_drive', default=False,
                 help=_('If True, build cloud-init user-data that is passed '
                        'to the config drive on Amphora boot instead of '
@@ -525,17 +546,6 @@ controller_worker_opts = [
                help=_('Number of times an amphora delete should be retried.')),
     cfg.IntOpt('amphora_delete_retry_interval', default=5,
                help=_('Time, in seconds, between amphora delete retries.')),
-    # 2000 attempts is around 2h45 with the default settings
-    cfg.IntOpt('db_commit_retry_attempts', default=2000,
-               help=_('The number of times the database action will be '
-                      'attempted.')),
-    cfg.IntOpt('db_commit_retry_initial_delay', default=1,
-               help=_('The initial delay before a retry attempt.')),
-    cfg.IntOpt('db_commit_retry_backoff', default=1,
-               help=_('The time to backoff retry attempts.')),
-    cfg.IntOpt('db_commit_retry_max', default=5,
-               help=_('The maximum amount of time to wait between retry '
-                      'attempts.')),
 ]
 
 task_flow_opts = [

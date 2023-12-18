@@ -15,14 +15,34 @@ from oslo_log import log as logging
 import oslo_messaging as messaging
 from oslo_messaging.rpc import dispatcher
 
+from octavia.common import utils
+
 LOG = logging.getLogger(__name__)
 
 TRANSPORT = None
+NOTIFIER = None
+NOTIFICATION_TRANSPORT = None
+
+# TODO(wuchunyang): octavia.exception need some rpc exception realted RCP
+ALLOWED_EXMODS = []
+
+EXTRA_EXMODS = []
 
 
 def init():
-    global TRANSPORT
+    global TRANSPORT, NOTIFICATION_TRANSPORT, NOTIFIER
     TRANSPORT = create_transport(get_transport_url())
+    exmods = get_allowed_exmods()
+    NOTIFICATION_TRANSPORT = messaging.get_notification_transport(
+        cfg.CONF,
+        allowed_remote_exmods=exmods)
+    # get_notification_transport has loaded oslo_messaging_notifications
+    # config group, so we can now check if notifications are actually enabled.
+    if utils.notifications_enabled(cfg.CONF):
+        # maybe we need implement serializer ,but now we use default
+        NOTIFIER = messaging.Notifier(NOTIFICATION_TRANSPORT)
+    else:
+        NOTIFIER = utils.DO_NOTHING
 
 
 def cleanup():
@@ -64,3 +84,26 @@ def get_server(target, endpoints, executor='threading',
 
 def create_transport(url):
     return messaging.get_rpc_transport(cfg.CONF, url=url)
+
+
+def get_allowed_exmods():
+    return ALLOWED_EXMODS + EXTRA_EXMODS
+
+
+@utils.if_notifications_enabled
+def get_notifier(service=None, host=None, publisher_id=None):
+    if NOTIFIER is None:
+        init()
+    if not publisher_id:
+        publisher_id = "%s.%s" % (service, host or cfg.CONF.host)
+    return NOTIFIER.prepare(publisher_id=publisher_id)
+
+
+@utils.if_notifications_enabled
+def notify_about_octavia_info(context,
+                              even_type,
+                              playload,
+                              publisher_id="octavia"):
+
+    notify = get_notifier(publisher_id=publisher_id)
+    notify.info(context, even_type, playload)

@@ -12,7 +12,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 import ipaddress
+import subprocess
 from unittest import mock
+
+from werkzeug import exceptions
 
 from octavia.amphorae.backends.agent.api_server import osutils
 from octavia.common import exceptions as octavia_exceptions
@@ -97,20 +100,6 @@ class TestOSUtils(base.TestCase):
         self.assertEqual(centos_cmd, returned_centos_cmd)
 
     @mock.patch('octavia.amphorae.backends.utils.interface_file.'
-                'InterfaceFile')
-    def test_write_interface_file(self, mock_interface_file):
-        mock_interface = mock.MagicMock()
-        mock_interface_file.return_value = mock_interface
-
-        self.ubuntu_os_util.write_interface_file('eth1',
-                                                 '192.0.2.2', 16)
-
-        mock_interface_file.assert_called_once_with(
-            name='eth1', if_type="lo",
-            addresses=[{"address": "192.0.2.2", "prefixlen": 16}])
-        mock_interface.write.assert_called_once()
-
-    @mock.patch('octavia.amphorae.backends.utils.interface_file.'
                 'VIPInterfaceFile')
     def test_write_vip_interface_file(self, mock_vip_interface_file):
         netns_interface = u'eth1234'
@@ -156,7 +145,6 @@ class TestOSUtils(base.TestCase):
             mtu=MTU,
             vrrp_ip=None,
             host_routes=host_routes,
-            fixed_ips=None,
             topology="SINGLE")
         mock_vip_interface_file.return_value.write.assert_called_once()
 
@@ -182,7 +170,6 @@ class TestOSUtils(base.TestCase):
             mtu=MTU,
             vrrp_ip=None,
             host_routes=host_routes,
-            fixed_ips=None,
             topology="SINGLE")
 
     @mock.patch('octavia.amphorae.backends.utils.interface_file.'
@@ -219,3 +206,75 @@ class TestOSUtils(base.TestCase):
             fixed_ips=fixed_ips,
             mtu=MTU)
         mock_port_interface_file.return_value.write.assert_called_once()
+
+
+    def test_plug_vip(self):
+        params = {'vip': '192.192.168.10', 'netcard': 'lo'}
+        cmd = 'ip a add {vip} dev {netcard}'.format(**params)
+
+        with mock.patch.object(osutils, 'subprocess') as sub:
+            self.base_os_util.plug_vip(**params)
+            sub.check_output.assert_called_once_with(
+                cmd.split(), stderr=sub.STDOUT)
+
+        # check for the exception
+        with mock.patch.object(
+                osutils.subprocess,
+                'check_output',
+                side_effect=subprocess.CalledProcessError(1, cmd.split())):
+            self.assertRaises(
+                exceptions.HTTPException, self.base_os_util.plug_vip, **params)
+
+    def test_unplug_vip(self):
+        params = {'vip': '192.192.168.10', 'netcard': 'lo'}
+        cmd = 'ip a del {vip} dev {netcard}'.format(**params)
+
+        with mock.patch.object(osutils, 'subprocess') as sub:
+            self.base_os_util.unplug_vip(**params)
+            sub.check_output.assert_called_once_with(
+                cmd.split(), stderr=sub.STDOUT)
+
+        # check for the exception
+        with mock.patch.object(
+                osutils.subprocess,
+                'check_output',
+                side_effect=subprocess.CalledProcessError(1, cmd.split())):
+            self.assertRaises(
+                exceptions.HTTPException,
+                self.base_os_util.unplug_vip, **params)
+
+    def test_UBT_config_eth1_interface(self):
+        netns_interface = u'eth1'
+        ADDRESS = u'192.0.2.1'
+        SUBNET_CIDR = u'192.0.2.0/24'
+        GATEWAY = u'192.51.100.1'
+        MTU = 1450
+
+        network = ipaddress.ip_network(SUBNET_CIDR)
+        broadcast = network.broadcast_address.exploded
+        netmask = network.netmask.exploded
+
+        path = self.ubuntu_os_util.get_network_interface_file(netns_interface)
+        mock_open = self.useFixture(test_utils.OpenFixture(path)).mock_open
+        mock_template = mock.MagicMock()
+
+        with mock.patch('os.open'), mock.patch.object(
+                os, 'fdopen', mock_open):
+            self.ubuntu_os_util.config_eth1_interface(
+                interface_file_path=path,
+                primary_interface=netns_interface,
+                address=ADDRESS,
+                broadcast=broadcast,
+                netmask=netmask,
+                gateway=GATEWAY,
+                mtu=MTU,
+                template=mock_template)
+
+        mock_template.render.assert_called_once_with(
+            interface=netns_interface,
+            address=ADDRESS,
+            broadcast=broadcast,
+            netmask=netmask,
+            gateway=GATEWAY,
+            mtu=MTU,
+        )

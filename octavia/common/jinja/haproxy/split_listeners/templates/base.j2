@@ -17,6 +17,7 @@
 global
     daemon
     user nobody
+    ssl-server-verify none
     log {{ log_http | default('/run/rsyslog/octavia/log', true)}} local{{ user_log_facility }}
     log {{ log_server | default('/run/rsyslog/octavia/log', true)}} local{{ administrative_log_facility }} notice
     stats socket {{ sock_path }} mode 0666 level user

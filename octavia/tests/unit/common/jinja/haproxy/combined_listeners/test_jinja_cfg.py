@@ -15,7 +15,6 @@
 
 import copy
 import os
-from unittest import mock
 
 from octavia_lib.common import constants as lib_consts
 from oslo_config import cfg
@@ -66,9 +65,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto https\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -120,9 +123,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto https\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -170,6 +177,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -225,6 +233,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -278,6 +287,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -331,6 +341,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -382,6 +393,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -417,9 +429,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -492,9 +508,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -528,9 +548,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 1\n"
@@ -563,9 +587,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -591,9 +619,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -629,8 +661,10 @@ class TestHaproxyCfg(base.TestCase):
               "%tsc\n\n")
         be = ("backend sample_pool_id_1:sample_listener_id_1\n"
               "    mode tcp\n"
+              "    option tcpka\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -665,8 +699,10 @@ class TestHaproxyCfg(base.TestCase):
               "%tsc\n\n")
         be = ("backend sample_pool_id_1:sample_listener_id_1\n"
               "    mode tcp\n"
+              "    option tcpka\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option ssl-hello-chk\n"
               "    fullconn {maxconn}\n"
@@ -692,6 +728,9 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -713,6 +752,9 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -734,9 +776,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option external-check\n"
               "    external-check command /var/lib/octavia/ping-wrapper.sh\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -757,36 +803,6 @@ class TestHaproxyCfg(base.TestCase):
         self.assertEqual(sample_configs_combined.sample_base_expected_config(
             backend=be, global_opts=go), rendered_obj)
 
-    def test_render_template_ping_monitor_http_insecure_fork(self):
-        be = ("backend sample_pool_id_1:sample_listener_id_1\n"
-              "    mode http\n"
-              "    balance roundrobin\n"
-              "    cookie SRV insert indirect nocache\n"
-              "    timeout check 31s\n"
-              "    option external-check\n"
-              "    external-check command /var/lib/octavia/ping-wrapper.sh\n"
-              "    fullconn {maxconn}\n"
-              "    option allbackups\n"
-              "    timeout connect 5000\n"
-              "    timeout server 50000\n"
-              "    server sample_member_id_1 10.0.0.99:82 "
-              "weight 13 check inter 30s fall 3 rise 2 "
-              "cookie sample_member_id_1\n"
-              "    server sample_member_id_2 10.0.0.98:82 "
-              "weight 13 check inter 30s fall 3 rise 2 "
-              "cookie sample_member_id_2\n\n").format(
-            maxconn=constants.HAPROXY_DEFAULT_MAXCONN)
-        go = (f"    maxconn {constants.HAPROXY_DEFAULT_MAXCONN}\n"
-              "    external-check\n    insecure-fork-wanted\n\n")
-        rendered_obj = self.jinja_cfg.render_loadbalancer_obj(
-            sample_configs_combined.sample_amphora_tuple(),
-            [sample_configs_combined.sample_listener_tuple(
-                proto='HTTP', monitor_proto='PING')],
-            feature_compatibility={
-                "requires_insecure_fork": True})
-        self.assertEqual(sample_configs_combined.sample_base_expected_config(
-            backend=be, global_opts=go), rendered_obj)
-
     def test_render_template_no_monitor_https(self):
         fe = ("frontend sample_listener_id_1\n"
               "    maxconn {maxconn}\n"
@@ -801,6 +817,7 @@ class TestHaproxyCfg(base.TestCase):
               "%tsc\n\n")
         be = ("backend sample_pool_id_1:sample_listener_id_1\n"
               "    mode tcp\n"
+              "    option tcpka\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
               "    fullconn {maxconn}\n"
@@ -824,10 +841,14 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.1\\r\\nHost:\\ "
               "testlab.com\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -860,6 +881,7 @@ class TestHaproxyCfg(base.TestCase):
               "%tsc\n\n")
         be = ("backend sample_pool_id_1:sample_listener_id_1\n"
               "    mode tcp\n"
+              "    option tcpka\n"
               "    balance roundrobin\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
@@ -880,6 +902,9 @@ class TestHaproxyCfg(base.TestCase):
         be = ("backend sample_pool_id_1:sample_listener_id_1\n"
               "    mode http\n"
               "    balance roundrobin\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -901,9 +926,13 @@ class TestHaproxyCfg(base.TestCase):
               "    balance roundrobin\n"
               "    stick-table type ip size 10k\n"
               "    stick on src\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -928,9 +957,13 @@ class TestHaproxyCfg(base.TestCase):
               "    stick-table type string len 64 size 10k\n"
               "    stick store-response res.cook(JSESSIONID)\n"
               "    stick match req.cook(JSESSIONID)\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -968,6 +1001,7 @@ class TestHaproxyCfg(base.TestCase):
               "%tsc\n\n")
         be = ("backend {pool_id}:{listener_id}\n"
               "    mode tcp\n"
+              "    option tcpka\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
               "    fullconn {maxconn}\n"
@@ -1000,6 +1034,7 @@ class TestHaproxyCfg(base.TestCase):
               "%tsc\n\n")
         be = ("backend sample_pool_id_1:sample_listener_id_1\n"
               "    mode tcp\n"
+              "    option tcpka\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
               "    fullconn 2014\n"
@@ -1051,9 +1086,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1067,9 +1106,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /healthmon.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1088,10 +1131,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
               "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1116,11 +1162,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
               "    option forwardfor\n"
               "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1146,7 +1194,9 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1173,6 +1223,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -1213,9 +1264,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1252,6 +1307,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -1292,6 +1348,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -1329,6 +1386,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -1362,6 +1420,7 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
@@ -1392,9 +1451,13 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1603,7 +1666,7 @@ class TestHaproxyCfg(base.TestCase):
                 defaults=defaults, logging="\n"),
             rendered_obj)
 
-    def test_haproxy_cfg_1_8_vs_1_5(self):
+    def test_http_reuse(self):
         j_cfg = jinja_cfg.JinjaTemplater(
             base_amp_path='/var/lib/octavia',
             base_crt_dir='/var/lib/octavia/certs')
@@ -1611,12 +1674,7 @@ class TestHaproxyCfg(base.TestCase):
         sample_amphora = sample_configs_combined.sample_amphora_tuple()
         sample_proxy_listener = sample_configs_combined.sample_listener_tuple(
             be_proto='PROXY')
-        # With http-reuse and server-state-file
-        go = (
-            "    server-state-file /var/lib/octavia/sample_loadbalancer_id_1/"
-            "servers-state\n"
-            "    maxconn {maxconn}\n\n").format(
-            maxconn=constants.HAPROXY_DEFAULT_MAXCONN)
+        # With http-reuse
         be = ("backend {pool_id}:{listener_id}\n"
               "    mode http\n"
               "    http-reuse safe\n"
@@ -1624,6 +1682,7 @@ class TestHaproxyCfg(base.TestCase):
               "    cookie SRV insert indirect nocache\n"
               "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1643,16 +1702,17 @@ class TestHaproxyCfg(base.TestCase):
             tls_certs=None,
             haproxy_versions=("1", "8", "1"))
         self.assertEqual(
-            sample_configs_combined.sample_base_expected_config(
-                global_opts=go, backend=be),
+            sample_configs_combined.sample_base_expected_config(backend=be),
             rendered_obj)
 
-        # Without http-reuse and server-state-file
+        # Without http-reuse
         be = ("backend {pool_id}:{listener_id}\n"
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
+              "    http-request set-header X-Forwarded-Proto http\n"
               "    fullconn {maxconn}\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
@@ -1725,10 +1785,15 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
               "    fullconn {maxconn}\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto https\n"
+              "    fullconn 1000000\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
               "    timeout server 50000\n"
@@ -1740,10 +1805,15 @@ class TestHaproxyCfg(base.TestCase):
               "    mode http\n"
               "    balance roundrobin\n"
               "    cookie SRV insert indirect nocache\n"
+              "    load-server-state-from-file global\n"
               "    timeout check 31s\n"
               "    option httpchk GET /healthmon.html HTTP/1.0\\r\\n\n"
               "    http-check expect rstatus 418\n"
               "    fullconn {maxconn}\n"
+              "    option forwardfor\n"
+              "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+              "    http-request set-header X-Forwarded-Proto https\n"
+              "    fullconn 1000000\n"
               "    option allbackups\n"
               "    timeout connect 5000\n"
               "    timeout server 50000\n"
@@ -1762,111 +1832,3 @@ class TestHaproxyCfg(base.TestCase):
             sample_configs_combined.sample_base_expected_config(
                 frontend=fe, backend=be),
             rendered_obj)
-
-    @mock.patch("octavia.common.jinja.haproxy.combined_listeners.jinja_cfg."
-                "JinjaTemplater.render_loadbalancer_obj")
-    def test_build_config(self, mock_render_loadbalancer_obj):
-        mock_amp = mock.Mock()
-        mock_listeners = mock.Mock()
-        mock_tls_certs = mock.Mock()
-        mock_socket_path = mock.Mock()
-
-        j_cfg = jinja_cfg.JinjaTemplater()
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("0", "7", "0"),
-                           socket_path=mock_socket_path)
-
-        expected_fc = {}
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)
-
-        mock_render_loadbalancer_obj.reset_mock()
-
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("1", "6", "0"),
-                           socket_path=mock_socket_path)
-
-        expected_fc = {
-            constants.HTTP_REUSE: True,
-            constants.SERVER_STATE_FILE: True
-
-        }
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)
-
-        mock_render_loadbalancer_obj.reset_mock()
-
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("1", "9", "0"),
-                           socket_path=mock_socket_path)
-
-        expected_fc = {
-            constants.HTTP_REUSE: True,
-            constants.SERVER_STATE_FILE: True,
-            constants.POOL_ALPN: True
-        }
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)
-
-        mock_render_loadbalancer_obj.reset_mock()
-
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("2", "1", "1"),
-                           socket_path=mock_socket_path)
-
-        expected_fc = {
-            constants.HTTP_REUSE: True,
-            constants.SERVER_STATE_FILE: True,
-            constants.POOL_ALPN: True,
-            lib_consts.PROTOCOL_PROMETHEUS: True
-        }
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)
-
-        mock_render_loadbalancer_obj.reset_mock()
-
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("2", "2", "1"),
-                           socket_path=mock_socket_path)
-
-        expected_fc = {
-            constants.HTTP_REUSE: True,
-            constants.SERVER_STATE_FILE: True,
-            constants.POOL_ALPN: True,
-            lib_consts.PROTOCOL_PROMETHEUS: True,
-            constants.INSECURE_FORK: True
-        }
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)
-
-        mock_render_loadbalancer_obj.reset_mock()
-
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("2", "4", "0"),
-                           socket_path=mock_socket_path)
-
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)
-
-        mock_render_loadbalancer_obj.reset_mock()
-
-        j_cfg.build_config(mock_amp, mock_listeners, mock_tls_certs,
-                           haproxy_versions=("3", "1", "0"),
-                           socket_path=mock_socket_path)
-
-        mock_render_loadbalancer_obj.assert_called_once_with(
-            mock_amp, mock_listeners, tls_certs=mock_tls_certs,
-            socket_path=mock_socket_path,
-            feature_compatibility=expected_fc)

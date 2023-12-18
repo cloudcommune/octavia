@@ -29,7 +29,6 @@ from werkzeug import exceptions
 
 from octavia.amphorae.backends.agent.api_server import haproxy_compatibility
 from octavia.amphorae.backends.agent.api_server import util
-from octavia.amphorae.backends.utils import haproxy_query
 from octavia.common import constants as consts
 from octavia.common import utils as octavia_utils
 
@@ -245,17 +244,6 @@ class Loadbalancer(object):
         if action == consts.AMP_ACTION_RELOAD:
             if consts.OFFLINE == self._check_haproxy_status(lb_id):
                 action = consts.AMP_ACTION_START
-            else:
-                # We first have to save the state when we reload
-                haproxy_state_file = util.state_file_path(lb_id)
-                stat_sock_file = util.haproxy_sock_path(lb_id)
-
-                lb_query = haproxy_query.HAProxyQuery(stat_sock_file)
-                if not lb_query.save_state(haproxy_state_file):
-                    # We accept to reload haproxy even if the state_file is
-                    # not generated, but we probably want to know about that
-                    # failure!
-                    LOG.warning('Failed to save haproxy-%s state!', lb_id)
 
         cmd = ("/usr/sbin/service haproxy-{lb_id} {action}".format(
             lb_id=lb_id, action=action))
@@ -399,7 +387,7 @@ class Loadbalancer(object):
 
         stream = Wrapped(flask.request.stream)
         file = self._cert_file_path(lb_id, filename)
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        flags = os.O_WRONLY | os.O_CREAT
         # mode 00600
         mode = stat.S_IRUSR | stat.S_IWUSR
         with os.fdopen(os.open(file, flags, mode), 'wb') as crt_file:

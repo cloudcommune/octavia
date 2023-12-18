@@ -15,8 +15,10 @@
 
 
 from oslo_config import cfg
+from oslo_context import context as oslo_context
 from oslo_log import log as logging
 from oslo_utils import excutils
+from oslo_utils import uuidutils
 from sqlalchemy.orm import exc as db_exceptions
 from taskflow.listeners import logging as tf_logging
 import tenacity
@@ -25,6 +27,7 @@ from octavia.common import base_taskflow
 from octavia.common import constants
 from octavia.common import exceptions
 from octavia.common import utils
+from octavia.common import rpc
 from octavia.controller.worker.v1.flows import amphora_flows
 from octavia.controller.worker.v1.flows import health_monitor_flows
 from octavia.controller.worker.v1.flows import l7policy_flows
@@ -35,6 +38,7 @@ from octavia.controller.worker.v1.flows import member_flows
 from octavia.controller.worker.v1.flows import pool_flows
 from octavia.db import api as db_apis
 from octavia.db import repositories as repo
+
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -127,6 +131,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         '60 seconds.', 'health_monitor', health_monitor_id)
             raise db_exceptions.NoResultFound
 
+        # send create health monitor to notification bus
+        context = oslo_context.RequestContext()
+        playload = {"id": health_mon.id,
+                    "provisioning_status": health_mon.provisioning_status,
+                    "project_id": health_mon.project_id,
+                    "pool_id": health_mon.pool_id,
+                    "name": health_mon.name,
+                    "created_at": health_mon.created_at,
+                    "operating_status": health_mon.operating_status}
+        rpc.notify_about_octavia_info(context,
+                                      "healthmonitor.create.start",
+                                      playload,
+                                      "octavia")
+
         pool = health_mon.pool
         listeners = pool.listeners
         pool.health_monitor = health_mon
@@ -142,6 +160,21 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                                log=LOG):
             create_hm_tf.run()
 
+        # send healthmonitor.create.end to notifications bus
+        health_mon = self._health_mon_repo.get(db_apis.get_session(),
+                                               id=health_monitor_id)
+        playload = {"id": health_mon.id,
+                    "provisioning_status": health_mon.provisioning_status,
+                    "project_id": health_mon.project_id,
+                    "pool_id": health_mon.pool_id,
+                    "name": health_mon.name,
+                    "created_at": health_mon.created_at,
+                    "operating_status": health_mon.operating_status}
+        rpc.notify_about_octavia_info(context,
+                                      "healthmonitor.create.end",
+                                      playload,
+                                      "octavia")
+
     def delete_health_monitor(self, health_monitor_id):
         """Deletes a health monitor.
 
@@ -156,6 +189,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         listeners = pool.listeners
         load_balancer = pool.load_balancer
 
+        # send delete start health monitor to notification bus
+        context = oslo_context.RequestContext()
+        playload = {"id": health_mon.id,
+                    "provisioning_status": health_mon.provisioning_status,
+                    "project_id": health_mon.project_id,
+                    "pool_id": health_mon.pool_id,
+                    "name": health_mon.name,
+                    "created_at": health_mon.created_at,
+                    "operating_status": health_mon.operating_status}
+        rpc.notify_about_octavia_info(context,
+                                      "healthmonitor.delete.start",
+                                      playload,
+                                      "octavia")
         delete_hm_tf = self.taskflow_load(
             self._health_monitor_flows.get_delete_health_monitor_flow(),
             store={constants.HEALTH_MON: health_mon,
@@ -165,6 +211,17 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(delete_hm_tf,
                                                log=LOG):
             delete_hm_tf.run()
+
+        # send delete healthmonitor end to notifications bus
+        playload = {"id": health_mon.id,
+                    "provisioning_status": "DELETED",
+                    "project_id": health_mon.project_id,
+                    "pool_id": health_mon.pool_id,
+                    "name": health_mon.name,
+                    "created_at": health_mon.created_at}
+        rpc.notify_about_octavia_info(context,
+                                      "healthmonitor.delete.end",
+                                      playload)
 
     def update_health_monitor(self, health_monitor_id, health_monitor_updates):
         """Updates a health monitor.
@@ -190,7 +247,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         listeners = pool.listeners
         pool.health_monitor = health_mon
         load_balancer = pool.load_balancer
-
+        # send update start health monitor to notification bus
+        context = oslo_context.RequestContext()
+        playload = {"id": health_mon.id,
+                    "provisioning_status": health_mon.provisioning_status,
+                    "project_id": health_mon.project_id,
+                    "pool_id": health_mon.pool_id,
+                    "name": health_mon.name,
+                    "created_at": health_mon.created_at,
+                    "operating_status": health_mon.operating_status}
+        rpc.notify_about_octavia_info(context,
+                                      "healthmonitor.update.start",
+                                      playload,
+                                      "octavia")
         update_hm_tf = self.taskflow_load(
             self._health_monitor_flows.get_update_health_monitor_flow(),
             store={constants.HEALTH_MON: health_mon,
@@ -201,6 +270,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(update_hm_tf,
                                                log=LOG):
             update_hm_tf.run()
+        # send healthmonitor.update.end to notifications bus
+        health_mon = self._health_mon_repo.get(db_apis.get_session(),
+                                               id=health_monitor_id)
+        playload = {"id": health_mon.id,
+                    "provisioning_status": health_mon.provisioning_status,
+                    "project_id": health_mon.project_id,
+                    "pool_id": health_mon.pool_id,
+                    "name": health_mon.name,
+                    "created_at": health_mon.created_at,
+                    "operating_status": health_mon.operating_status}
+        rpc.notify_about_octavia_info(context,
+                                      "healthmonitor.update.end",
+                                      playload)
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -226,6 +308,18 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
 
         load_balancer = listener.load_balancer
         listeners = load_balancer.listeners
+        # send create listener start to notifications bus
+        context = oslo_context.RequestContext()
+        playload = {"id": listener.id,
+                    "project_id": listener.project_id,
+                    "name": listener.name,
+                    "operating_status": listener.operating_status,
+                    "provisioning_status": listener.provisioning_status,
+                    "load_balancer_id": listener.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "listener.create.start",
+                                      playload,
+                                      "octavia")
 
         create_listener_tf = self.taskflow_load(self._listener_flows.
                                                 get_create_listener_flow(),
@@ -236,6 +330,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(create_listener_tf,
                                                log=LOG):
             create_listener_tf.run()
+        # send create.end to notifications bus
+        listener = self._listener_repo.get(db_apis.get_session(),
+                                           id=listener_id)
+        playload = {"id": listener.id,
+                    "project_id": listener.project_id,
+                    "name": listener.name,
+                    "operating_status": listener.operating_status,
+                    "provisioning_status": listener.provisioning_status,
+                    "load_balancer_id": listener.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "listener.create.end",
+                                      playload,
+                                      "octavia")
 
     def delete_listener(self, listener_id):
         """Deletes a listener.
@@ -248,6 +355,18 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                            id=listener_id)
         load_balancer = listener.load_balancer
 
+        # send delete listener start to notifications bus
+        context = oslo_context.RequestContext()
+        playload = {"id": listener.id,
+                    "project_id": listener.project_id,
+                    "name": listener.name,
+                    "operating_status": listener.operating_status,
+                    "provisioning_status": listener.provisioning_status,
+                    "load_balancer_id": listener.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "listener.delete.start",
+                                      playload,
+                                      "octavia")
         delete_listener_tf = self.taskflow_load(
             self._listener_flows.get_delete_listener_flow(),
             store={constants.LOADBALANCER: load_balancer,
@@ -255,6 +374,17 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(delete_listener_tf,
                                                log=LOG):
             delete_listener_tf.run()
+
+        # send delete listener end to notifications bus
+        playload = {"id": listener.id,
+                    "project_id": listener.project_id,
+                    "name": listener.name,
+                    "provisioning_status": "DELETED",
+                    "load_balancer_id": listener.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "listener.delete.end",
+                                      playload,
+                                      "octavia")
 
     def update_listener(self, listener_id, listener_updates):
         """Updates a listener.
@@ -276,6 +406,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         constants.PENDING_UPDATE)
             listener = e.last_attempt.result()
 
+        # send update listener start to notifications bus
+        context = oslo_context.RequestContext()
+        playload = {"id": listener.id,
+                    "project_id": listener.project_id,
+                    "name": listener.name,
+                    "operating_status": listener.operating_status,
+                    "provisioning_status": listener.provisioning_status,
+                    "load_balancer_id": listener.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "listener.update.start",
+                                      playload,
+                                      "octavia")
+
         load_balancer = listener.load_balancer
 
         update_listener_tf = self.taskflow_load(self._listener_flows.
@@ -290,6 +433,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                                            [listener]})
         with tf_logging.DynamicLoggingListener(update_listener_tf, log=LOG):
             update_listener_tf.run()
+        # send update  end to notifications bus
+        listener = self._listener_repo.get(db_apis.get_session(),
+                                           id=listener_id)
+        playload = {"id": listener.id,
+                    "project_id": listener.project_id,
+                    "name": listener.name,
+                    "operating_status": listener.operating_status,
+                    "provisioning_status": listener.provisioning_status,
+                    "load_balancer_id": listener.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "listener.update.end",
+                                      playload,
+                                      "octavia")
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -311,11 +467,27 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         :returns: None
         :raises NoResultFound: Unable to find the object
         """
+
         lb = self._lb_repo.get(db_apis.get_session(), id=load_balancer_id)
         if not lb:
             LOG.warning('Failed to fetch %s %s from DB. Retrying for up to '
                         '60 seconds.', 'load_balancer', load_balancer_id)
             raise db_exceptions.NoResultFound
+        # send notifications to bus
+        playload = {"id": lb.id,
+                    "project_id": lb.project_id,
+                    "name": lb.name,
+                    "provisioning_status": lb.provisioning_status,
+                    "operating_status": lb.operating_status,
+                    "created_at": lb.created_at,
+                    "topology": lb.topology,
+                    "provider": lb.provider,
+                    "flavor_id": lb.flavor_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "loadbalancer.create.start",
+                                      playload,
+                                      "octavia")
 
         # TODO(johnsom) convert this to octavia_lib constant flavor
         # once octavia is transitioned to use octavia_lib
@@ -336,11 +508,28 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         }
 
         create_lb_flow = self._lb_flows.get_create_load_balancer_flow(
-            topology=topology, listeners=lb.listeners)
+            topology=topology, listeners=lb.listeners, flavor=flavor)
 
         create_lb_tf = self.taskflow_load(create_lb_flow, store=store)
         with tf_logging.DynamicLoggingListener(create_lb_tf, log=LOG):
             create_lb_tf.run()
+        # we need send notifications to bus
+        # regain the lb_obj, because this has changed
+        lb = self._lb_repo.get(db_apis.get_session(), id=load_balancer_id)
+        playload = {"id": lb.id,
+                    "project_id": lb.project_id,
+                    "name": lb.name,
+                    "provisioning_status": lb.provisioning_status,
+                    "operating_status": lb.operating_status,
+                    "created_at": lb.created_at,
+                    "topology": lb.topology,
+                    "provider": lb.provider,
+                    "flavor_id": lb.flavor_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "loadbalancer.create.end",
+                                      playload,
+                                      "octavia")
 
     def delete_load_balancer(self, load_balancer_id, cascade=False):
         """Deletes a load balancer by de-allocating Amphorae.
@@ -352,18 +541,51 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         lb = self._lb_repo.get(db_apis.get_session(),
                                id=load_balancer_id)
 
+        # send notifications to bus
+        playload = {"id": lb.id,
+                    "project_id": lb.project_id,
+                    "name": lb.name,
+                    "provisioning_status": lb.provisioning_status,
+                    "operating_status": lb.operating_status,
+                    "created_at": lb.created_at,
+                    "topology": lb.topology,
+                    "provider": lb.provider,
+                    "flavor_id": lb.flavor_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "loadbalancer.delete.start",
+                                      playload,
+                                      "octavia")
+
         if cascade:
             (flow,
              store) = self._lb_flows.get_cascade_delete_load_balancer_flow(lb)
         else:
             (flow, store) = self._lb_flows.get_delete_load_balancer_flow(lb)
         store.update({constants.LOADBALANCER: lb,
+                      constants.LOADBALANCER_ID: load_balancer_id,
                       constants.SERVER_GROUP_ID: lb.server_group_id})
         delete_lb_tf = self.taskflow_load(flow, store=store)
 
         with tf_logging.DynamicLoggingListener(delete_lb_tf,
                                                log=LOG):
             delete_lb_tf.run()
+        # send delete loadbalancer start to notifications bus
+        lb = self._lb_repo.get(db_apis.get_session(), id=load_balancer_id)
+        playload = {"id": lb.id,
+                    "project_id": lb.project_id,
+                    "name": lb.name,
+                    "provisioning_status": lb.provisioning_status,
+                    "operating_status": lb.operating_status,
+                    "created_at": lb.created_at,
+                    "topology": lb.topology,
+                    "provider": lb.provider,
+                    "flavor_id": lb.flavor_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "loadbalancer.delete.end",
+                                      playload,
+                                      "octavia")
 
     def update_load_balancer(self, load_balancer_id, load_balancer_updates):
         """Updates a load balancer.
@@ -385,6 +607,21 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         constants.PENDING_UPDATE)
             lb = e.last_attempt.result()
 
+        # send notifications to bus
+        playload = {"id": lb.id,
+                    "project_id": lb.project_id,
+                    "name": lb.name,
+                    "provisioning_status": lb.provisioning_status,
+                    "operating_status": lb.operating_status,
+                    "created_at": lb.created_at,
+                    "topology": lb.topology,
+                    "provider": lb.provider,
+                    "flavor_id": lb.flavor_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "loadbalancer.update.start",
+                                      playload,
+                                      "octavia")
         listeners, _ = self._listener_repo.get_all(
             db_apis.get_session(),
             load_balancer_id=load_balancer_id)
@@ -398,6 +635,22 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(update_lb_tf,
                                                log=LOG):
             update_lb_tf.run()
+        # send update loadbalancer start to notifications bus
+        lb = self._lb_repo.get(db_apis.get_session(), id=load_balancer_id)
+        playload = {"id": lb.id,
+                    "project_id": lb.project_id,
+                    "name": lb.name,
+                    "provisioning_status": lb.provisioning_status,
+                    "operating_status": lb.operating_status,
+                    "created_at": lb.created_at,
+                    "topology": lb.topology,
+                    "provider": lb.provider,
+                    "flavor_id": lb.flavor_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "loadbalancer.update.end",
+                                      playload,
+                                      "octavia")
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -424,12 +677,25 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         pool = member.pool
         listeners = pool.listeners
         load_balancer = pool.load_balancer
+        # send notifications to bus
+        playload = {"id": member.id,
+                    "project_id": member.project_id,
+                    "name": member.name,
+                    "provisioning_status": member.provisioning_status,
+                    "operating_status": member.operating_status,
+                    "created_at": member.created_at,
+                    "pool_id": member.pool_id,
+                    "subnet_id": member.subnet_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "member.create.start",
+                                      playload,
+                                      "octavia")
 
         store = {
             constants.MEMBER: member,
             constants.LISTENERS: listeners,
             constants.LOADBALANCER: load_balancer,
-            constants.LOADBALANCER_ID: load_balancer.id,
             constants.POOL: pool}
         if load_balancer.availability_zone:
             store[constants.AVAILABILITY_ZONE] = (
@@ -445,6 +711,21 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                                log=LOG):
             create_member_tf.run()
 
+        # send member create end to notifications bus
+        member = self._member_repo.get(db_apis.get_session(),
+                                       id=member_id)
+        playload = {"id": member.id,
+                    "project_id": member.project_id,
+                    "name": member.name,
+                    "provisioning_status": member.provisioning_status,
+                    "operating_status": member.operating_status,
+                    "created_at": member.created_at,
+                    "pool_id": member.pool_id,
+                    "subnet_id": member.subnet_id}
+        rpc.notify_about_octavia_info(context,
+                                      "member.create.end",
+                                      playload)
+
     def delete_member(self, member_id):
         """Deletes a pool member.
 
@@ -457,12 +738,25 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         pool = member.pool
         listeners = pool.listeners
         load_balancer = pool.load_balancer
+        # send notifications to bus
+        playload = {"id": member.id,
+                    "project_id": member.project_id,
+                    "name": member.name,
+                    "provisioning_status": member.provisioning_status,
+                    "operating_status": member.operating_status,
+                    "created_at": member.created_at,
+                    "pool_id": member.pool_id,
+                    "subnet_id": member.subnet_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "member.delete.start",
+                                      playload,
+                                      "octavia")
 
         store = {
             constants.MEMBER: member,
             constants.LISTENERS: listeners,
             constants.LOADBALANCER: load_balancer,
-            constants.LOADBALANCER_ID: load_balancer.id,
             constants.POOL: pool}
         if load_balancer.availability_zone:
             store[constants.AVAILABILITY_ZONE] = (
@@ -478,6 +772,17 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(delete_member_tf,
                                                log=LOG):
             delete_member_tf.run()
+        # send member delete end to notifications bus
+        playload = {"id": member.id,
+                    "project_id": member.project_id,
+                    "name": member.name,
+                    "provisioning_status": "DELETED",
+                    "created_at": member.created_at,
+                    "pool_id": member.pool_id,
+                    "subnet_id": member.subnet_id}
+        rpc.notify_about_octavia_info(context,
+                                      "member.delete.end",
+                                      playload)
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -514,7 +819,6 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         store = {
             constants.LISTENERS: listeners,
             constants.LOADBALANCER: load_balancer,
-            constants.LOADBALANCER_ID: load_balancer.id,
             constants.POOL: pool}
         if load_balancer.availability_zone:
             store[constants.AVAILABILITY_ZONE] = (
@@ -549,6 +853,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         'an upgrade is in progress and continuing.',
                         constants.PENDING_UPDATE)
             member = e.last_attempt.result()
+        # send notifications to bus
+        playload = {"id": member.id,
+                    "project_id": member.project_id,
+                    "name": member.name,
+                    "provisioning_status": member.provisioning_status,
+                    "operating_status": member.operating_status,
+                    "created_at": member.created_at,
+                    "pool_id": member.pool_id,
+                    "subnet_id": member.subnet_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "member.update.start",
+                                      playload,
+                                      "octavia")
 
         pool = member.pool
         listeners = pool.listeners
@@ -573,6 +891,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(update_member_tf,
                                                log=LOG):
             update_member_tf.run()
+        # send member update end to notifications bus
+        member = self._member_repo.get(db_apis.get_session(),
+                                       id=member_id)
+        playload = {"id": member.id,
+                    "project_id": member.project_id,
+                    "name": member.name,
+                    "provisioning_status": member.provisioning_status,
+                    "operating_status": member.operating_status,
+                    "created_at": member.created_at,
+                    "pool_id": member.pool_id,
+                    "subnet_id": member.subnet_id}
+        rpc.notify_about_octavia_info(context,
+                                      "member.update.end",
+                                      playload)
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -596,6 +928,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         '60 seconds.', 'pool', pool_id)
             raise db_exceptions.NoResultFound
 
+        # send notifications to bus
+        playload = {"id": pool.id,
+                    "project_id": pool.project_id,
+                    "name": pool.name,
+                    "provisioning_status": pool.provisioning_status,
+                    "operating_status": pool.operating_status,
+                    "created_at": pool.created_at,
+                    "load_balancer_id": pool.load_balancer_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "pool.create.start",
+                                      playload,
+                                      "octavia")
         listeners = pool.listeners
         load_balancer = pool.load_balancer
 
@@ -609,6 +954,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(create_pool_tf,
                                                log=LOG):
             create_pool_tf.run()
+        # send create pool end to notifications bus
+        pool = self._pool_repo.get(db_apis.get_session(),
+                                   id=pool_id)
+        playload = {"id": pool.id,
+                    "project_id": pool.project_id,
+                    "name": pool.name,
+                    "provisioning_status": pool.provisioning_status,
+                    "operating_status": pool.operating_status,
+                    "created_at": pool.created_at,
+                    "load_balancer_id": pool.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "pool.create.end",
+                                      playload,
+                                      "octavia")
 
     def delete_pool(self, pool_id):
         """Deletes a node pool.
@@ -619,6 +978,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         """
         pool = self._pool_repo.get(db_apis.get_session(),
                                    id=pool_id)
+        # send notifications to bus
+        playload = {"id": pool.id,
+                    "project_id": pool.project_id,
+                    "name": pool.name,
+                    "provisioning_status": pool.provisioning_status,
+                    "operating_status": pool.operating_status,
+                    "created_at": pool.created_at,
+                    "load_balancer_id": pool.load_balancer_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "pool.delete.start",
+                                      playload,
+                                      "octavia")
 
         load_balancer = pool.load_balancer
         listeners = pool.listeners
@@ -630,6 +1002,16 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(delete_pool_tf,
                                                log=LOG):
             delete_pool_tf.run()
+        # Seding delete pool end to notifications bus
+        playload = {"id": pool.id,
+                    "project_id": pool.project_id,
+                    "name": pool.name,
+                    "provisioning_status": "DELETED",
+                    "created_at": pool.created_at,
+                    "load_balancer_id": pool.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "pool.delete.end",
+                                      playload)
 
     def update_pool(self, pool_id, pool_updates):
         """Updates a node pool.
@@ -651,6 +1033,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         constants.PENDING_UPDATE)
             pool = e.last_attempt.result()
 
+        # send notifications to bus
+        playload = {"id": pool.id,
+                    "project_id": pool.project_id,
+                    "name": pool.name,
+                    "provisioning_status": pool.provisioning_status,
+                    "operating_status": pool.operating_status,
+                    "created_at": pool.created_at,
+                    "load_balancer_id": pool.load_balancer_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "pool.update.start",
+                                      playload,
+                                      "octavia")
+
         listeners = pool.listeners
         load_balancer = pool.load_balancer
 
@@ -666,6 +1062,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(update_pool_tf,
                                                log=LOG):
             update_pool_tf.run()
+        # send update pool end to notifications bus
+        pool = self._pool_repo.get(db_apis.get_session(),
+                                   id=pool_id)
+        playload = {"id": pool.id,
+                    "project_id": pool.project_id,
+                    "name": pool.name,
+                    "provisioning_status": pool.provisioning_status,
+                    "operating_status": pool.operating_status,
+                    "created_at": pool.created_at,
+                    "load_balancer_id": pool.load_balancer_id}
+        rpc.notify_about_octavia_info(context,
+                                      "pool.update.end",
+                                      playload,
+                                      "octavia")
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -689,6 +1099,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         '60 seconds.', 'l7policy', l7policy_id)
             raise db_exceptions.NoResultFound
 
+        # send notifications to bus
+        playload = {"id": l7policy.id,
+                    "project_id": l7policy.project_id,
+                    "name": l7policy.name,
+                    "provisioning_status": l7policy.provisioning_status,
+                    "operating_status": l7policy.operating_status,
+                    "created_at": l7policy.created_at,
+                    "listener_id": l7policy.listener_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.create.start",
+                                      playload,
+                                      "octavia")
+
         listeners = [l7policy.listener]
         load_balancer = l7policy.listener.load_balancer
 
@@ -701,6 +1125,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                                log=LOG):
             create_l7policy_tf.run()
 
+        # send l7policy create end to notifications bus
+        l7policy = self._l7policy_repo.get(db_apis.get_session(),
+                                           id=l7policy_id)
+        playload = {"id": l7policy.id,
+                    "project_id": l7policy.project_id,
+                    "name": l7policy.name,
+                    "provisioning_status": l7policy.provisioning_status,
+                    "operating_status": l7policy.operating_status,
+                    "created_at": l7policy.created_at,
+                    "listener_id": l7policy.listener_id}
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.create.end",
+                                      playload)
+
     def delete_l7policy(self, l7policy_id):
         """Deletes an L7 policy.
 
@@ -710,7 +1148,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         """
         l7policy = self._l7policy_repo.get(db_apis.get_session(),
                                            id=l7policy_id)
-
+        # send notifications to bus
+        playload = {"id": l7policy.id,
+                    "project_id": l7policy.project_id,
+                    "name": l7policy.name,
+                    "provisioning_status": l7policy.provisioning_status,
+                    "operating_status": l7policy.operating_status,
+                    "created_at": l7policy.created_at,
+                    "listener_id": l7policy.listener_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.delete.start",
+                                      playload,
+                                      "octavia")
         load_balancer = l7policy.listener.load_balancer
         listeners = [l7policy.listener]
 
@@ -722,6 +1172,16 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(delete_l7policy_tf,
                                                log=LOG):
             delete_l7policy_tf.run()
+        # send delete l7policy end to notifications bus
+        playload = {"id": l7policy.id,
+                    "project_id": l7policy.project_id,
+                    "name": l7policy.name,
+                    "provisioning_status": "DELETED",
+                    "created_at": l7policy.created_at,
+                    "listener_id": l7policy.listener_id}
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.delete.end",
+                                      playload)
 
     def update_l7policy(self, l7policy_id, l7policy_updates):
         """Updates an L7 policy.
@@ -742,7 +1202,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         'an upgrade is in progress and continuing.',
                         constants.PENDING_UPDATE)
             l7policy = e.last_attempt.result()
-
+        # send notifications to bus
+        playload = {"id": l7policy.id,
+                    "project_id": l7policy.project_id,
+                    "name": l7policy.name,
+                    "provisioning_status": l7policy.provisioning_status,
+                    "operating_status": l7policy.operating_status,
+                    "created_at": l7policy.created_at,
+                    "listener_id": l7policy.listener_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.update.start",
+                                      playload,
+                                      "octavia")
         listeners = [l7policy.listener]
         load_balancer = l7policy.listener.load_balancer
 
@@ -755,6 +1227,71 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(update_l7policy_tf,
                                                log=LOG):
             update_l7policy_tf.run()
+        # send l7policy update end to notifications bus
+        l7policy = self._l7policy_repo.get(db_apis.get_session(),
+                                           id=l7policy_id)
+        playload = {"id": l7policy.id,
+                    "project_id": l7policy.project_id,
+                    "name": l7policy.name,
+                    "provisioning_status": l7policy.provisioning_status,
+                    "operating_status": l7policy.operating_status,
+                    "created_at": l7policy.created_at,
+                    "listener_id": l7policy.listener_id}
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.update.end",
+                                      playload)
+
+    def batch_update_l7policy(self, l7policies):
+        LOG.info(f"updating batch of l7policies: {l7policies}")
+        db_l7policies = []
+        for l7policy in l7policies:
+            try:
+                db_l7policy = self._get_db_obj_until_pending_update(
+                    self._l7policy_repo, l7policy.get('l7policy_id'))
+            except tenacity.RetryError as e:
+                LOG.warning('L7 policy did not go into %s in 60 seconds. '
+                            'This either due to an in-progress Octavia upgrade '
+                            'or an overloaded and failing database. Assuming '
+                            'an upgrade is in progress and continuing.',
+                            constants.PENDING_UPDATE)
+                db_l7policy = e.last_attempt.result()
+            db_l7policies.append(db_l7policy)
+
+        listeners = [db_l7policies[0].listener]
+        load_balancer = db_l7policies[0].listener.load_balancer
+        payload = {"listener_id": db_l7policies[0].listener_id,
+                   "project_id": db_l7policies[0].project_id,
+                   "lb_provisioning_status": load_balancer.provisioning_status,
+                   "lb_operating_status": load_balancer.operating_status}
+        LOG.info(f"Send l7policy batch update start payload: {payload} to notification")
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.batch.update.start",
+                                      payload,
+                                      "octavia")
+        batch_update_l7policy_tf = self.taskflow_load(
+            self._l7policy_flows.get_batch_update_l7policies_flow(),
+            store={constants.L7POLICIES: db_l7policies,
+                   constants.LISTENERS: listeners,
+                   constants.LOADBALANCER: load_balancer})
+        with tf_logging.DynamicLoggingListener(batch_update_l7policy_tf,
+                                               log=LOG):
+            batch_update_l7policy_tf.run()
+        # Force SQL alchemy to query the DB, otherwise we get inconsistent
+        # results
+        one_l7policy_id = l7policies[0].get('l7policy_id')
+        one_db_l7policy = self._l7policy_repo.get(db_apis.get_session(),
+                                                  id=one_l7policy_id)
+        load_balancer = one_db_l7policy.listener.load_balancer
+        payload = {"listener_id": one_db_l7policy.listener_id,
+                   "project_id": one_db_l7policy.project_id,
+                   "lb_provisioning_status": load_balancer.provisioning_status,
+                   "lb_operating_status": load_balancer.operating_status}
+        LOG.info(f"Send l7policy batch update end payload: {payload} to notification")
+        rpc.notify_about_octavia_info(context,
+                                      "l7policy.batch.update.end",
+                                      payload,
+                                      "octavia")
 
     @tenacity.retry(
         retry=tenacity.retry_if_exception_type(db_exceptions.NoResultFound),
@@ -777,7 +1314,18 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
             LOG.warning('Failed to fetch %s %s from DB. Retrying for up to '
                         '60 seconds.', 'l7rule', l7rule_id)
             raise db_exceptions.NoResultFound
-
+        # send notifications to bus
+        playload = {"id": l7rule.id,
+                    "project_id": l7rule.project_id,
+                    "provisioning_status": l7rule.provisioning_status,
+                    "operating_status": l7rule.operating_status,
+                    "created_at": l7rule.created_at,
+                    "l7policy_id": l7rule.l7policy_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7rule.create.start",
+                                      playload,
+                                      "octavia")
         l7policy = l7rule.l7policy
         listeners = [l7policy.listener]
         load_balancer = l7policy.listener.load_balancer
@@ -792,6 +1340,19 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                                log=LOG):
             create_l7rule_tf.run()
 
+        # send l7 rule create end to notifications bus
+        l7rule = self._l7rule_repo.get(db_apis.get_session(),
+                                       id=l7rule_id)
+        playload = {"id": l7rule.id,
+                    "project_id": l7rule.project_id,
+                    "provisioning_status": l7rule.provisioning_status,
+                    "operating_status": l7rule.operating_status,
+                    "created_at": l7rule.created_at,
+                    "l7policy_id": l7rule.l7policy_id}
+        rpc.notify_about_octavia_info(context,
+                                      "rule.create.end",
+                                      playload)
+
     def delete_l7rule(self, l7rule_id):
         """Deletes an L7 rule.
 
@@ -801,6 +1362,18 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         """
         l7rule = self._l7rule_repo.get(db_apis.get_session(),
                                        id=l7rule_id)
+        # send notifications to bus
+        playload = {"id": l7rule.id,
+                    "project_id": l7rule.project_id,
+                    "provisioning_status": l7rule.provisioning_status,
+                    "operating_status": l7rule.operating_status,
+                    "created_at": l7rule.created_at,
+                    "l7policy_id": l7rule.l7policy_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7rule.delete.start",
+                                      playload,
+                                      "octavia")
         l7policy = l7rule.l7policy
         load_balancer = l7policy.listener.load_balancer
         listeners = [l7policy.listener]
@@ -814,6 +1387,16 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(delete_l7rule_tf,
                                                log=LOG):
             delete_l7rule_tf.run()
+
+        # send delete l7rule end to notifications bus
+        playload = {"id": l7rule.id,
+                    "project_id": l7rule.project_id,
+                    "provisioning_status": "DELETED",
+                    "created_at": l7rule.created_at,
+                    "l7policy_id": l7rule.l7policy_id}
+        rpc.notify_about_octavia_info(context,
+                                      "rule.delete.end",
+                                      playload)
 
     def update_l7rule(self, l7rule_id, l7rule_updates):
         """Updates an L7 rule.
@@ -834,7 +1417,18 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                         'an upgrade is in progress and continuing.',
                         constants.PENDING_UPDATE)
             l7rule = e.last_attempt.result()
-
+        # send notifications to bus
+        playload = {"id": l7rule.id,
+                    "project_id": l7rule.project_id,
+                    "provisioning_status": l7rule.provisioning_status,
+                    "operating_status": l7rule.operating_status,
+                    "created_at": l7rule.created_at,
+                    "l7policy_id": l7rule.l7policy_id}
+        context = oslo_context.RequestContext()
+        rpc.notify_about_octavia_info(context,
+                                      "l7rule.update.start",
+                                      playload,
+                                      "octavia")
         l7policy = l7rule.l7policy
         listeners = [l7policy.listener]
         load_balancer = l7policy.listener.load_balancer
@@ -849,6 +1443,18 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         with tf_logging.DynamicLoggingListener(update_l7rule_tf,
                                                log=LOG):
             update_l7rule_tf.run()
+        # send l7 rule update end to notifications bus
+        l7rule = self._l7rule_repo.get(db_apis.get_session(),
+                                       id=l7rule_id)
+        playload = {"id": l7rule.id,
+                    "project_id": l7rule.project_id,
+                    "provisioning_status": l7rule.provisioning_status,
+                    "operating_status": l7rule.operating_status,
+                    "created_at": l7rule.created_at,
+                    "l7policy_id": l7rule.l7policy_id}
+        rpc.notify_about_octavia_info(context,
+                                      "rule.update.end",
+                                      playload)
 
     def failover_amphora(self, amphora_id, reraise=False):
         """Perform failover operations for an amphora.
@@ -890,9 +1496,10 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                                  id=amphora.load_balancer_id)
             lb_amp_count = None
             if loadbalancer:
-                if loadbalancer.topology == constants.TOPOLOGY_ACTIVE_STANDBY:
+                if loadbalancer.topology in (constants.TOPOLOGY_ACTIVE_STANDBY,
+                                             constants.TOPOLOGY_MULTI_ACTIVE):
                     lb_amp_count = 2
-                elif loadbalancer.topology == constants.TOPOLOGY_SINGLE:
+                if loadbalancer.topology == constants.TOPOLOGY_SINGLE:
                     lb_amp_count = 1
 
             amp_failover_flow = self._amphora_flows.get_failover_amphora_flow(
@@ -913,6 +1520,7 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                 else:
                     flavor = {constants.LOADBALANCER_TOPOLOGY:
                               loadbalancer.topology}
+
                 if loadbalancer.availability_zone:
                     az_metadata = (
                         self._az_repo.get_availability_zone_metadata_dict(
@@ -929,6 +1537,8 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                              constants.SERVER_GROUP_ID: server_group_id,
                              constants.LOADBALANCER_ID: lb_id,
                              constants.VIP: vip}
+            if loadbalancer:
+                stored_params[constants.LOADBALANCER_TOPOLOGY] = loadbalancer.topology
 
             failover_amphora_tf = self.taskflow_load(amp_failover_flow,
                                                      store=stored_params)
@@ -965,7 +1575,8 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
         :raises octavia.common.exceptions.InvalidTopology: LB has an unknown
                                                            topology.
         """
-        if load_balancer.topology == constants.TOPOLOGY_SINGLE:
+        if load_balancer.topology in (constants.TOPOLOGY_SINGLE,
+                                      constants.TOPOLOGY_MULTI_ACTIVE):
             # In SINGLE topology, amp failover order does not matter
             return [a for a in load_balancer.amphorae
                     if a.status != constants.DELETED]
@@ -1034,9 +1645,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
             if lb is None:
                 raise exceptions.NotFound(resource=constants.LOADBALANCER,
                                           id=load_balancer_id)
-
             # Get the ordered list of amphorae to failover for this LB.
             amps = self._get_amphorae_for_failover(lb)
+
+            if lb.flavor_id:
+                flavor = self._flavor_repo.get_flavor_metadata_dict(
+                    db_apis.get_session(), lb.flavor_id)
+                if flavor[constants.LOADBALANCER_TOPOLOGY]:
+                    # update lb_topology with flavor topology
+                    self._lb_repo.update(db_apis.get_session(),
+                                         id=lb.id,
+                                         topology=flavor[constants.LOADBALANCER_TOPOLOGY])
+                    #refresh lb object
+                    lb = self._lb_repo.get(db_apis.get_session(),
+                                           id=load_balancer_id)
 
             if lb.topology == constants.TOPOLOGY_SINGLE:
                 if len(amps) != 1:
@@ -1044,11 +1666,20 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                                 'one should exist. Repairing.', len(amps),
                                 load_balancer_id)
             elif lb.topology == constants.TOPOLOGY_ACTIVE_STANDBY:
-
                 if len(amps) != 2:
                     LOG.warning('%d amphorae found on load balancer %s where '
                                 'two should exist. Repairing.', len(amps),
                                 load_balancer_id)
+
+            elif lb.topology == constants.TOPOLOGY_MULTI_ACTIVE:
+                if lb.flavor_id and flavor.get('MULTI_ACTIVE_NUM'):
+                    multi_num = flavor.get('MULTI_ACTIVE_NUM')
+                else:
+                    multi_num = CONF.controller_worker.multi_active_num
+                if len(amps) != multi_num:
+                    LOG.warning('%d amphorae found on load balancer %s where '
+                                '%d should exist. Repairing.', len(amps),
+                                load_balancer_id, multi_num)
             else:
                 LOG.error('Unknown load balancer topology found: %s, aborting '
                           'failover!', lb.topology)
@@ -1084,10 +1715,42 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
             failover_lb_tf = self.taskflow_load(lb_failover_flow,
                                                 store=stored_params)
 
+            # send notifications to bus
+            playload = {"id": lb.id,
+                        "project_id": lb.project_id,
+                        "name": lb.name,
+                        "provisioning_status": lb.provisioning_status,
+                        "operating_status": lb.operating_status,
+                        "created_at": lb.created_at,
+                        "topology": lb.topology,
+                        "provider": lb.provider,
+                        "flavor_id": lb.flavor_id}
+            context = oslo_context.RequestContext()
+            rpc.notify_about_octavia_info(context,
+                                          "loadbalancer.failover.start",
+                                          playload,
+                                          "octavia")
+
             with tf_logging.DynamicLoggingListener(failover_lb_tf, log=LOG):
                 failover_lb_tf.run()
             LOG.info('Failover of load balancer %s completed successfully.',
                      lb.id)
+            lb = self._lb_repo.get(db_apis.get_session(),
+                                   id=load_balancer_id)
+            playload = {"id": lb.id,
+                        "project_id": lb.project_id,
+                        "name": lb.name,
+                        "provisioning_status": lb.provisioning_status,
+                        "operating_status": lb.operating_status,
+                        "created_at": lb.created_at,
+                        "topology": lb.topology,
+                        "provider": lb.provider,
+                        "flavor_id": lb.flavor_id}
+            context = oslo_context.RequestContext()
+            rpc.notify_about_octavia_info(context,
+                                          "loadbalancer.failover.end",
+                                          playload,
+                                          "octavia")
 
         except Exception as e:
             with excutils.save_and_reraise_exception(reraise=False):
@@ -1096,6 +1759,85 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
                 self._lb_repo.update(
                     db_apis.get_session(), load_balancer_id,
                     provisioning_status=constants.ERROR)
+
+    def scale_load_balancer(self, load_balancer_id):
+        """Perform scale operations for a load balancer.
+
+        Note: This expects the load balancer to already be in
+        provisioning_status=PENDING_UPDATE state and this only
+        works with multi-active topology
+
+        :param load_balancer_id: ID for load balancer to scale
+        :returns: None
+        :raises octavia.commom.exceptions.NotFound: The load balancer was not
+                                                    found.
+        """
+        try:
+            lb = self._get_db_obj_until_pending_update(
+                self._lb_repo, load_balancer_id)
+
+            if lb is None:
+                raise exceptions.NotFound(resource=constants.LOADBALANCER,
+                                          id=load_balancer_id)
+            current_amps = self._get_amphorae_for_failover(lb)
+            flavor = self._flavor_repo.get_flavor_metadata_dict(
+                db_apis.get_session(), lb.flavor_id)
+            expected_amps = flavor.get(constants.MULTI_ACTIVE_NUM)
+            delta_amps = expected_amps - len(current_amps)
+
+            # Build our scale flow.
+            lb_scale_flow = self._lb_flows.get_scale_LB_flow(delta_amps)
+
+            stored_params = {constants.LOADBALANCER: lb,
+                             constants.BUILD_TYPE_PRIORITY:
+                                 constants.LB_CREATE_FAILOVER_PRIORITY,
+                             constants.SERVER_GROUP_ID: lb.server_group_id,
+                             constants.LOADBALANCER_ID: lb.id,
+                             constants.FLAVOR: flavor}
+            if lb.availability_zone:
+                stored_params[constants.AVAILABILITY_ZONE] = (
+                    self._az_repo.get_availability_zone_metadata_dict(
+                        db_apis.get_session(), lb.availability_zone))
+            else:
+                stored_params[constants.AVAILABILITY_ZONE] = {}
+
+            if lb.vip.qos_policy_id:
+                stored_params[constants.UPDATE_DICT] = {'vip': {'qos_policy_id': lb.vip.qos_policy_id}}
+            else:
+                stored_params[constants.UPDATE_DICT] = {}
+
+            scale_lb_tf = self.taskflow_load(lb_scale_flow,
+                                             store=stored_params)
+            # send notifications to bus
+            payload = {"id": lb.id, "name": lb.name,
+                       "provisioning_status": lb.provisioning_status,
+                       "operating_status": lb.operating_status}
+            rpc.notify_about_octavia_info({},
+                                          "loadbalancer.resize.start",
+                                          payload,
+                                          "octavia")
+
+            with tf_logging.DynamicLoggingListener(scale_lb_tf, log=LOG):
+                scale_lb_tf.run()
+            LOG.info('scale of load balancer %s completed successfully.',
+                     lb.id)
+            lb = self._lb_repo.get(db_apis.get_session(),
+                                   id=load_balancer_id)
+            payload = {"id": lb.id, "name": lb.name,
+                       "provisioning_status": lb.provisioning_status,
+                       "operating_status": lb.operating_status}
+            rpc.notify_about_octavia_info({},
+                                          "loadbalancer.resize.end",
+                                          payload,
+                                          "octavia")
+        except Exception as e:
+            with excutils.save_and_reraise_exception(reraise=False):
+                LOG.exception("LB %(lbid)s scale exception: %(exc)s",
+                              {'lbid': load_balancer_id, 'exc': str(e)})
+                self._lb_repo.update(
+                    db_apis.get_session(), load_balancer_id,
+                    provisioning_status=constants.ERROR)
+
 
     def amphora_cert_rotation(self, amphora_id):
         """Perform cert rotation for an amphora.
@@ -1141,10 +1883,17 @@ class ControllerWorker(base_taskflow.BaseTaskFlowEngine):
             flavor = self._flavor_repo.get_flavor_metadata_dict(
                 db_apis.get_session(), lb.flavor_id)
 
+        if lb:
+            loadbalancer_topology = lb.topology
+        else:
+            loadbalancer_topology = None
+
         update_amphora_tf = self.taskflow_load(
-            self._amphora_flows.update_amphora_config_flow(),
+            self._amphora_flows.update_amphora_config_flow(amp),
             store={constants.AMPHORA: amp,
-                   constants.FLAVOR: flavor})
+                   constants.LOADBALANCER_ID: lb.id,
+                   constants.FLAVOR: flavor,
+                   constants.LOADBALANCER_TOPOLOGY: loadbalancer_topology})
 
         with tf_logging.DynamicLoggingListener(update_amphora_tf,
                                                log=LOG):

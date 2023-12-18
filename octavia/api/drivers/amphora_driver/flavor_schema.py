@@ -37,7 +37,8 @@ SUPPORTED_FLAVOR_SCHEMA = {
             "type": "string",
             "description": "The load balancer topology. One of: "
                            "SINGLE - One amphora per load balancer. "
-                           "ACTIVE_STANDBY - Two amphora per load balancer.",
+                           "ACTIVE_STANDBY - Two amphora per load balancer."
+                           "MULTI_ACTIVE - More amphora per load balancer.",
             "enum": list(consts.SUPPORTED_LB_TOPOLOGIES)
         },
         consts.COMPUTE_FLAVOR: {
@@ -47,6 +48,14 @@ SUPPORTED_FLAVOR_SCHEMA = {
         consts.AMP_IMAGE_TAG: {
             "type": "string",
             "description": "The amphora image tag."
+        },
+        consts.MULTI_ACTIVE_NUM: {
+            "type": "integer",
+            "description": "The amphora num for multi-active topology."
+        },
+        consts.CONNECTION_LIMIT: {
+            "type": "integer",
+            "description": "The connection limit for per amphora."
         }
     }
 }

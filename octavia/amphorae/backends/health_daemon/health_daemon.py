@@ -15,9 +15,11 @@
 #    under the License.
 
 import errno
+import ipaddress
 import os
 import queue
 import stat
+import subprocess
 import time
 
 from oslo_config import cfg
@@ -28,7 +30,7 @@ from octavia.amphorae.backends.agent.api_server import util
 from octavia.amphorae.backends.health_daemon import health_sender
 from octavia.amphorae.backends.utils import haproxy_query
 from octavia.amphorae.backends.utils import keepalivedlvs_query
-
+from octavia.common import constants
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -103,69 +105,94 @@ def list_sock_stat_files(hadir=None):
         stat_sock_files[lb_id] = os.path.join(hadir, sock_file)
     return stat_sock_files
 
-
 def run_sender(cmd_queue):
     LOG.info('Health Manager Sender starting.')
     sender = health_sender.UDPStatusSender()
 
     keepalived_cfg_path = util.keepalived_cfg_path()
     keepalived_pid_path = util.keepalived_pid_path()
-
-    while True:
+    lb_topology = CONF.controller_worker.loadbalancer_topology
+    LOG.debug('lb_topology is %s', lb_topology)
+    if lb_topology == constants.TOPOLOGY_MULTI_ACTIVE:
+        gateway_ip = CONF.amphora_agent.gateway_ip
         try:
-            # If the keepalived config file is present check
-            # that it is running, otherwise don't send the health
-            # heartbeat
-            if os.path.isfile(keepalived_cfg_path):
-                # Is there a pid file for keepalived?
-                with open(keepalived_pid_path,
-                          'r', encoding='utf-8') as pid_file:
-                    pid = int(pid_file.readline())
-                os.kill(pid, 0)
+            # validate the gateway ip address to prevent RCE issue
+            ipaddress.ip_address(gateway_ip)
+        except ValueError:
+            LOG.warning("gateway_ip %s is not a valid ip", gateway_ip)
+            raise
 
-            message = build_stats_message()
-            sender.dosend(message)
-        except (IOError, OSError) as e:
-            if e.errno == errno.ENOENT:
-                # Missing PID file, skip health heartbeat.
-                LOG.error('Missing keepalived PID file %s, skipping health '
-                          'heartbeat.', keepalived_pid_path)
-            elif e.errno == errno.ESRCH:
-                # Keepalived is not running, skip health heartbeat.
-                LOG.error('Keepalived is configured but not running, '
-                          'skipping health heartbeat.')
+        while True:
+            LOG.debug('gateway_ip is %s', gateway_ip)
+            cmd = "ip netns exec amphora-haproxy ping "
+            cmd1 = "-n -w 1 -c 1 %s > /dev/null 2>&1" % gateway_ip
+            if subprocess.call(cmd+cmd1, shell=True):
+                LOG.error('This amphorae is not reachable')
             else:
-                LOG.exception('Failed to check keepalived and haproxy status '
-                              'due to exception %s, skipping health '
-                              'heartbeat.', str(e))
-        except Exception as e:
-            LOG.exception('Failed to check keepalived and haproxy status due '
-                          'to exception %s, skipping health heartbeat.',
-                          str(e))
+                LOG.debug('do the first sender')
+                message = build_stats_message()
+                sender.dosend(message)
+            try:
+                cmd = cmd_queue.get_nowait()
+                if cmd == 'reload':
+                    LOG.info('Reloading configuration')
+                    CONF.reload_config_files()
+                elif cmd == 'shutdown':
+                    LOG.info('Health Manager Sender shutting down.')
+                    break
+            except queue.Empty:
+                pass
+            time.sleep(CONF.health_manager.heartbeat_interval)
+    else:
+        while True:
+            try:
+                # If the keepalived config file is present check
+                # that it is running, otherwise don't send the health
+                # heartbeat
+                if os.path.isfile(keepalived_cfg_path):
+                    # Is there a pid file for keepalived?
+                    with open(keepalived_pid_path,
+                              'r', encoding='utf-8') as pid_file:
+                        pid = int(pid_file.readline())
+                    os.kill(pid, 0)
 
-        try:
-            cmd = cmd_queue.get_nowait()
-            if cmd == 'reload':
-                LOG.info('Reloading configuration')
-                CONF.reload_config_files()
-            elif cmd == 'shutdown':
-                LOG.info('Health Manager Sender shutting down.')
-                break
-        except queue.Empty:
-            pass
-        time.sleep(CONF.health_manager.heartbeat_interval)
+                message = build_stats_message()
+                sender.dosend(message)
+            except (IOError, OSError) as e:
+                if e.errno == errno.ENOENT:
+                    # Missing PID file, skip health heartbeat.
+                    LOG.error('Missing keepalived PID file %s, skipping health '
+                              'heartbeat.', keepalived_pid_path)
+                elif e.errno == errno.ESRCH:
+                    # Keepalived is not running, skip health heartbeat.
+                    LOG.error('Keepalived is configured but not running, '
+                              'skipping health heartbeat.')
+                else:
+                    LOG.exception('Failed to check keepalived and haproxy status '
+                                  'due to exception %s, skipping health '
+                                  'heartbeat.', str(e))
+            except Exception as e:
+                LOG.exception('Failed to check keepalived and haproxy status due '
+                              'to exception %s, skipping health heartbeat.',
+                              str(e))
+
+            try:
+                cmd = cmd_queue.get_nowait()
+                if cmd == 'reload':
+                    LOG.info('Reloading configuration')
+                    CONF.reload_config_files()
+                elif cmd == 'shutdown':
+                    LOG.info('Health Manager Sender shutting down.')
+                    break
+            except queue.Empty:
+                pass
+            time.sleep(CONF.health_manager.heartbeat_interval)
 
 
 def get_stats(stat_sock_file):
-    try:
-        stats_query = haproxy_query.HAProxyQuery(stat_sock_file)
-        stats = stats_query.show_stat()
-        pool_status = stats_query.get_pool_status()
-    except Exception as e:
-        LOG.warning('Unable to query the HAProxy stats (%s) due to: %s',
-                    stat_sock_file, str(e))
-        # Return empty lists so that the heartbeat will still be sent
-        return [], {}
+    stats_query = haproxy_query.HAProxyQuery(stat_sock_file)
+    stats = stats_query.show_stat()
+    pool_status = stats_query.get_pool_status()
     return stats, pool_status
 
 

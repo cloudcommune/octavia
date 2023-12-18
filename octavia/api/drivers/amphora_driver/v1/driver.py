@@ -56,11 +56,6 @@ AMPHORA_SUPPORTED_PROTOCOLS = [
     lib_consts.PROTOCOL_PROMETHEUS,
 ]
 
-VALID_L7POLICY_LISTENER_PROTOCOLS = [
-    lib_consts.PROTOCOL_HTTP,
-    lib_consts.PROTOCOL_TERMINATED_HTTPS
-]
-
 
 class AmphoraProviderDriver(driver_base.ProviderDriver):
     def __init__(self):
@@ -151,6 +146,10 @@ class AmphoraProviderDriver(driver_base.ProviderDriver):
     def loadbalancer_failover(self, loadbalancer_id):
         payload = {consts.LOAD_BALANCER_ID: loadbalancer_id}
         self.client.cast({}, 'failover_load_balancer', **payload)
+
+    def loadbalancer_scale(self, loadbalancer_id):
+        payload = {consts.LOAD_BALANCER_ID: loadbalancer_id}
+        self.client.cast({}, 'scale_load_balancer', **payload)
 
     def loadbalancer_update(self, old_loadbalancer, new_loadbalancer):
         # Adapt the provider data model to the queue schema
@@ -345,14 +344,6 @@ class AmphoraProviderDriver(driver_base.ProviderDriver):
 
     # L7 Policy
     def l7policy_create(self, l7policy):
-        db_listener = self.repositories.listener.get(db_apis.get_session(),
-                                                     id=l7policy.listener_id)
-        if db_listener.protocol not in VALID_L7POLICY_LISTENER_PROTOCOLS:
-            msg = ('%s protocol listeners do not support L7 policies' % (
-                db_listener.protocol))
-            raise exceptions.UnsupportedOptionError(
-                user_fault_string=msg,
-                operator_fault_string=msg)
         payload = {consts.L7POLICY_ID: l7policy.l7policy_id}
         self.client.cast({}, 'create_l7policy', **payload)
 
@@ -370,6 +361,11 @@ class AmphoraProviderDriver(driver_base.ProviderDriver):
         payload = {consts.L7POLICY_ID: l7policy_id,
                    consts.L7POLICY_UPDATES: l7policy_dict}
         self.client.cast({}, 'update_l7policy', **payload)
+
+    def l7policy_batch_update(self, l7policy_list):
+        l7policy_dict_list = [l7policy.to_dict() for l7policy in l7policy_list]
+        payload = {"l7policies": l7policy_dict_list}
+        self.client.cast({}, 'batch_update_l7policy', **payload)
 
     # L7 Rule
     def l7rule_create(self, l7rule):

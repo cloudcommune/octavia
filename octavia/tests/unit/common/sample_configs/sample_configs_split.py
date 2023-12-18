@@ -23,20 +23,16 @@ from octavia.tests.common import sample_certs
 CONF = cfg.CONF
 
 
-class AmphoraTuple(collections.namedtuple(
-        'amphora', 'id, lb_network_ip, vrrp_ip, ha_ip, vrrp_port_id, '
-                   'ha_port_id, role, status, vrrp_interface,'
-                   'vrrp_priority, api_version')):
-    def to_dict(self):
-        return self._asdict()
-
-
 def sample_amphora_tuple(id='sample_amphora_id_1', lb_network_ip='10.0.1.1',
                          vrrp_ip='10.1.1.1', ha_ip='192.168.10.1',
                          vrrp_port_id='1234', ha_port_id='1234', role=None,
                          status='ACTIVE', vrrp_interface=None,
                          vrrp_priority=None, api_version='0.5'):
-    return AmphoraTuple(
+    in_amphora = collections.namedtuple(
+        'amphora', 'id, lb_network_ip, vrrp_ip, ha_ip, vrrp_port_id, '
+                   'ha_port_id, role, status, vrrp_interface,'
+                   'vrrp_priority, api_version')
+    return in_amphora(
         id=id,
         lb_network_ip=lb_network_ip,
         vrrp_ip=vrrp_ip,
@@ -603,9 +599,9 @@ def sample_vrrp_group_tuple():
         smtp_connect_timeout='')
 
 
-def sample_vip_tuple(ip_address='10.0.0.2', subnet_id='vip_subnet_uuid'):
-    vip = collections.namedtuple('vip', ('ip_address', 'subnet_id'))
-    return vip(ip_address=ip_address, subnet_id=subnet_id)
+def sample_vip_tuple():
+    vip = collections.namedtuple('vip', 'ip_address')
+    return vip(ip_address='10.0.0.2')
 
 
 def sample_listener_tuple(proto=None, monitor=True, alloc_default_pool=True,
@@ -1099,6 +1095,9 @@ def sample_base_expected_config(frontend=None, logging=None, backend=None,
                    "    timeout check 31s\n"
                    "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
                    "    http-check expect rstatus 418\n"
+                   "    option forwardfor\n"
+                   "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+                   "    http-request set-header X-Forwarded-Proto http\n"
                    "    fullconn {maxconn}\n"
                    "    option allbackups\n"
                    "    timeout connect 5000\n"
@@ -1126,6 +1125,7 @@ def sample_base_expected_config(frontend=None, logging=None, backend=None,
             "global\n"
             "    daemon\n"
             "    user nobody\n"
+            "    ssl-server-verify none\n"
             "    log /run/rsyslog/octavia/log local0\n"
             "    log /run/rsyslog/octavia/log local1 notice\n"
             "    stats socket /var/lib/octavia/sample_listener_id_1.sock"

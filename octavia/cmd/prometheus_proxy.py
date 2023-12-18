@@ -724,11 +724,21 @@ class PrometheusProxy(SimpleHTTPRequestHandler):
         metrics_buffer += mem_metric_string
         return metrics_buffer
 
+    def _add_disk_utilization(self, metrics_buffer):
+        disk_pcnt = psutil.disk_usage("/").percent
+        metrics_buffer += ("# HELP octavia_loadbalancer_disk Load balancer "
+                           "memory utilization (percentage).\n")
+        metrics_buffer += "# TYPE octavia_loadbalancer_disk gauge\n"
+        mem_metric_string = f"octavia_loadbalancer_disk {disk_pcnt:.1f}\n"
+        metrics_buffer += mem_metric_string
+        return metrics_buffer
+
     def do_GET(self):
         metrics_buffer = ""
 
         metrics_buffer = self._add_cpu_utilization(metrics_buffer)
         metrics_buffer = self._add_memory_utilization(metrics_buffer)
+        metrics_buffer = self._add_disk_utilization(metrics_buffer)
 
         try:
             with urllib.request.urlopen(METRICS_URL) as source:  # nosec

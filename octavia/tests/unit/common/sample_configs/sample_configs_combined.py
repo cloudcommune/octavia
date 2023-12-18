@@ -24,20 +24,16 @@ from octavia.tests.common import sample_certs
 CONF = cfg.CONF
 
 
-class AmphoraTuple(collections.namedtuple(
-        'amphora', 'id, lb_network_ip, vrrp_ip, ha_ip, vrrp_port_id, '
-                   'ha_port_id, role, status, vrrp_interface,'
-                   'vrrp_priority, api_version')):
-    def to_dict(self):
-        return self._asdict()
-
-
 def sample_amphora_tuple(id='sample_amphora_id_1', lb_network_ip='10.0.1.1',
                          vrrp_ip='10.1.1.1', ha_ip='192.168.10.1',
                          vrrp_port_id='1234', ha_port_id='1234', role=None,
                          status='ACTIVE', vrrp_interface=None,
                          vrrp_priority=None, api_version='1.0'):
-    amp = AmphoraTuple(
+    in_amphora = collections.namedtuple(
+        'amphora', 'id, lb_network_ip, vrrp_ip, ha_ip, vrrp_port_id, '
+                   'ha_port_id, role, status, vrrp_interface,'
+                   'vrrp_priority, api_version')
+    return in_amphora(
         id=id,
         lb_network_ip=lb_network_ip,
         vrrp_ip=vrrp_ip,
@@ -49,7 +45,6 @@ def sample_amphora_tuple(id='sample_amphora_id_1', lb_network_ip='10.0.1.1',
         vrrp_interface=vrrp_interface,
         vrrp_priority=vrrp_priority,
         api_version=api_version)
-    return amp
 
 
 RET_PERSISTENCE = {
@@ -576,7 +571,7 @@ RET_SCTP_LISTENER = {
 
 
 def sample_listener_loadbalancer_tuple(
-        topology=None, enabled=True, vip=None, pools=None):
+        topology=None, enabled=True, pools=None):
     if topology and topology in ['ACTIVE_STANDBY', 'ACTIVE_ACTIVE']:
         more_amp = True
     else:
@@ -588,7 +583,7 @@ def sample_listener_loadbalancer_tuple(
     return in_lb(
         id='sample_loadbalancer_id_1',
         name='test-lb',
-        vip=vip or sample_vip_tuple(),
+        vip=sample_vip_tuple(),
         amphorae=[sample_amphora_tuple(role=constants.ROLE_MASTER),
                   sample_amphora_tuple(
                       id='sample_amphora_id_2',
@@ -605,13 +600,13 @@ def sample_listener_loadbalancer_tuple(
 
 
 def sample_lb_with_udp_listener_tuple(
-        topology=None, enabled=True, listeners=None, pools=None):
+        topology=None, enabled=True, pools=None):
     if topology and topology in ['ACTIVE_STANDBY', 'ACTIVE_ACTIVE']:
         more_amp = True
     else:
         more_amp = False
         topology = constants.TOPOLOGY_SINGLE
-    listeners = listeners or [sample_listener_tuple(
+    listeners = [sample_listener_tuple(
         proto=constants.PROTOCOL_UDP,
         persistence_type=constants.SESSION_PERSISTENCE_SOURCE_IP,
         persistence_timeout=33,
@@ -655,9 +650,9 @@ def sample_vrrp_group_tuple():
         smtp_connect_timeout='')
 
 
-def sample_vip_tuple(ip_address='10.0.0.2', subnet_id='vip_subnet_uuid'):
-    vip = collections.namedtuple('vip', ('ip_address', 'subnet_id'))
-    return vip(ip_address=ip_address, subnet_id=subnet_id)
+def sample_vip_tuple():
+    vip = collections.namedtuple('vip', 'ip_address')
+    return vip(ip_address='10.0.0.2')
 
 
 def sample_listener_tuple(proto=None, monitor=True, alloc_default_pool=True,
@@ -1221,9 +1216,13 @@ def sample_base_expected_config(frontend=None, logging=None, backend=None,
                    "    mode http\n"
                    "    balance roundrobin\n"
                    "    cookie SRV insert indirect nocache\n"
+                   "    load-server-state-from-file global\n"
                    "    timeout check 31s\n"
                    "    option httpchk GET /index.html HTTP/1.0\\r\\n\n"
                    "    http-check expect rstatus 418\n"
+                   "    option forwardfor\n"
+                   "    http-request set-header X-Forwarded-Port %[dst_port]\n"
+                   "    http-request set-header X-Forwarded-Proto http\n"
                    "    fullconn {maxconn}\n"
                    "    option allbackups\n"
                    "    timeout connect 5000\n"
@@ -1251,8 +1250,11 @@ def sample_base_expected_config(frontend=None, logging=None, backend=None,
             "global\n"
             "    daemon\n"
             "    user nobody\n"
+            "    ssl-server-verify none\n"
             "    log /run/rsyslog/octavia/log local0\n"
             "    log /run/rsyslog/octavia/log local1 notice\n"
             "    stats socket /var/lib/octavia/sample_loadbalancer_id_1.sock"
-            " mode 0666 level user\n" +
+            " mode 0666 level user\n"
+            "    server-state-file /var/lib/octavia/sample_loadbalancer_id_1"
+            "/servers-state\n" +
             global_opts + defaults + peers + frontend + logging + backend)

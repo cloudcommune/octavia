@@ -14,9 +14,6 @@
 # under the License.
 
 import abc
-from typing import Optional
-
-from octavia.db import models as db_models
 
 
 class AmphoraLoadBalancerDriver(object, metaclass=abc.ABCMeta):
@@ -153,6 +150,29 @@ class AmphoraLoadBalancerDriver(object, metaclass=abc.ABCMeta):
         an offline pool after this call.
         """
 
+    # multi active
+    def post_loop_vip_plug(self, amphora, load_balancer,
+                           amphorae_network_config, vip_subnet=None):
+        """Called after network driver has allocated and plugged the VIP
+
+        :param amphora:
+        :type amphora: octavia.db.models.Amphora
+        :param load_balancer: A load balancer that just had its vip allocated
+                              and plugged in the network driver.
+        :type load_balancer: octavia.common.data_models.LoadBalancer
+        :param amphorae_network_config: A data model containing information
+                                        about the subnets and ports that an
+                                        amphorae owns.
+        :param vip_subnet: VIP subnet associated with the load balancer
+        :type vip_subnet: octavia.network.data_models.Subnet
+
+        :type vip_network: octavia.network.data_models.AmphoraNetworkConfig
+        :returns: None
+
+        This is to do any additional work needed on the amphorae to plug
+        the vip, such as bring up interfaces.
+        """
+
     def post_vip_plug(self, amphora, load_balancer, amphorae_network_config,
                       vrrp_port=None, vip_subnet=None):
         """Called after network driver has allocated and plugged the VIP
@@ -165,8 +185,6 @@ class AmphoraLoadBalancerDriver(object, metaclass=abc.ABCMeta):
         :param amphorae_network_config: A data model containing information
                                         about the subnets and ports that an
                                         amphorae owns.
-        :type amphorae_network_config: octavia.network.data_models.
-                                       AmphoraNetworkConfig
         :param vrrp_port: VRRP port associated with the load balancer
         :type vrrp_port: octavia.network.data_models.Port
 
@@ -180,18 +198,13 @@ class AmphoraLoadBalancerDriver(object, metaclass=abc.ABCMeta):
         the vip, such as bring up interfaces.
         """
 
-    def post_network_plug(self, amphora, port, amphora_network_config):
+    def post_network_plug(self, amphora, port):
         """Called after amphora added to network
 
         :param amphora: amphora object, needs id and network ip(s)
         :type amphora: octavia.db.models.Amphora
         :param port: contains information of the plugged port
         :type port: octavia.network.data_models.Port
-        :param amphora_network_config: A data model containing information
-                                        about the subnets and ports that an
-                                        amphorae owns.
-        :type amphora_network_config: octavia.network.data_models.
-                                      AmphoraNetworkConfig
 
         This method is optional to implement.  After adding an amphora to a
         network, there may be steps necessary on the amphora to allow it to
@@ -232,19 +245,6 @@ class AmphoraLoadBalancerDriver(object, metaclass=abc.ABCMeta):
                              req_read_timeout, conn_max_retries,
                              conn_retry_interval
         :type timeout_dict: dict
-        """
-
-    @abc.abstractmethod
-    def check(self, amphora: db_models.Amphora,
-              timeout_dict: Optional[dict] = None):
-        """Check connectivity to the amphora.
-
-        :param amphora: The amphora to query.
-        :param timeout_dict: Dictionary of timeout values for calls to the
-                             amphora. May contain: req_conn_timeout,
-                             req_read_timeout, conn_max_retries,
-                             conn_retry_interval
-        :raises TimeOutException: The amphora didn't reply
         """
 
 

@@ -33,6 +33,10 @@ ln -s $AMP_VENV/bin/amphora-interface /usr/local/bin/amphora-interface || true
 # Link the prometheus proxy
 ln -s $AMP_VENV/bin/prometheus-proxy /usr/local/bin/prometheus-proxy || true
 
+# Link the prometheus proxy management namespaces
+ln -s $AMP_VENV/bin/prometheus-proxy-mgmt /usr/local/bin/prometheus-proxy-mgmt || true
+
+
 mkdir /etc/octavia
 # we assume certs, etc will come in through the config drive
 mkdir /etc/octavia/certs
@@ -48,6 +52,7 @@ case "$DIB_INIT_SYSTEM" in
     systemd)
         install -D -g root -o root -m 0644 ${SCRIPTDIR}/amphora-agent.service /usr/lib/systemd/system/amphora-agent.service
         install -D -g root -o root -m 0644 ${SCRIPTDIR}/prometheus-proxy.service /usr/lib/systemd/system/prometheus-proxy.service
+        install -D -g root -o root -m 0644 ${SCRIPTDIR}/prometheus-proxy-mgmt.service /usr/lib/systemd/system/prometheus-proxy-mgmt.service
         ;;
     sysv)
         install -D -g root -o root -m 0644 ${SCRIPTDIR}/amphora-agent.init /etc/init.d/amphora-agent.init

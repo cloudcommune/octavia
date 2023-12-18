@@ -119,15 +119,21 @@ class MemberController(base.BaseController):
         """Validate creating member on pool."""
         try:
             return self.repositories.member.create(lock_session, **member_dict)
-        except odb_exceptions.DBDuplicateEntry as e:
-            raise exceptions.DuplicateMemberEntry(
-                ip_address=member_dict.get('ip_address'),
-                port=member_dict.get('protocol_port')) from e
-        except odb_exceptions.DBReferenceError as e:
-            raise exceptions.InvalidOption(value=member_dict.get(e.key),
-                                           option=e.key) from e
+        except odb_exceptions.DBDuplicateEntry as de:
+            column_list = ['pool_id', 'ip_address', 'protocol_port']
+            constraint_list = ['uq_member_pool_id_address_protocol_port']
+            if ['id'] == de.columns:
+                raise exceptions.IDAlreadyExists()
+            if (set(column_list) == set(de.columns) or
+                    set(constraint_list) == set(de.columns)):
+                raise exceptions.DuplicateMemberEntry(
+                    ip_address=member_dict.get('ip_address'),
+                    port=member_dict.get('protocol_port'))
         except odb_exceptions.DBError as e:
-            raise exceptions.APIException() from e
+            # TODO(blogan): will have to do separate validation protocol
+            # before creation or update since the exception messages
+            # do not give any information as to what constraint failed
+            raise exceptions.InvalidOption(value='', option='') from e
         return None
 
     def _validate_pool_id(self, member_id, db_member_pool_id):
@@ -325,6 +331,7 @@ class MembersController(MemberController):
         context = pecan_request.context.get('octavia_context')
 
         db_pool = self._get_db_pool(context.session, self.pool_id)
+        old_members = db_pool.members
 
         project_id, provider = self._get_lb_project_id_provider(
             context.session, db_pool.load_balancer_id)
@@ -336,16 +343,18 @@ class MembersController(MemberController):
             self._auth_validate_action(context, project_id,
                                        constants.RBAC_DELETE)
 
+        # Validate member subnets
+        for member in members:
+            if member.subnet_id and not validate.subnet_exists(
+                    member.subnet_id, context=context):
+                raise exceptions.NotFound(resource='Subnet',
+                                          id=member.subnet_id)
+
         # Load the driver early as it also provides validation
         driver = driver_factory.get_driver(provider)
 
         with db_api.get_lock_session() as lock_session:
             self._test_lb_and_listener_and_pool_statuses(lock_session)
-
-            # Reload the pool, the members may have been updated between the
-            # first query in this function and the lock of the loadbalancer
-            db_pool = self._get_db_pool(context.session, self.pool_id)
-            old_members = db_pool.members
 
             old_member_uniques = {
                 (m.ip_address, m.protocol_port): m.id for m in old_members}
@@ -386,27 +395,8 @@ class MembersController(MemberController):
                     resource=data_models.Member._name())
 
             provider_members = []
-            valid_subnets = set()
             # Create new members
             for m in new_members:
-                # NOTE(mnaser): In order to avoid hitting the Neutron API hard
-                # when creating many new members, we cache the
-                # validation results. We also validate new
-                # members only since subnet ID is immutable.
-                # If the member doesn't have a subnet, or the subnet is
-                # already valid, move on. Run validate and add it to
-                # cache otherwise.
-                if m.subnet_id and m.subnet_id not in valid_subnets:
-                    # If the subnet does not exist,
-                    # raise an exception and get out.
-                    if not validate.subnet_exists(
-                            m.subnet_id, context=context):
-                        raise exceptions.NotFound(
-                            resource='Subnet', id=m.subnet_id)
-
-                    # Mark the subnet as valid for future runs.
-                    valid_subnets.add(m.subnet_id)
-
                 m = m.to_dict(render_unsets=False)
                 m['project_id'] = db_pool.project_id
                 created_member = self._graph_create(lock_session, m)

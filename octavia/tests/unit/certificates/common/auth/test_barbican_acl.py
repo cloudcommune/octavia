@@ -91,4 +91,5 @@ class TestBarbicanACLAuth(base.TestCase):
         bc = acl_auth_object.get_barbican_client_user_auth(mock.Mock())
         self.assertTrue(hasattr(bc, 'containers') and
                         hasattr(bc.containers, 'register_consumer'))
-        self.assertEqual('public', bc.client.interface)
+        self.assertEqual('publicURL', bc.client.interface)
+        self.assertEqual('RegionOne', bc.client.region_name)

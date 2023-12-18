@@ -96,6 +96,12 @@ class Server(object):
         self.app.add_url_rule(rule=PATH_PREFIX + '/listeners/<object_id>',
                               view_func=self.delete_lb_object,
                               methods=['DELETE'])
+        self.app.add_url_rule(rule=PATH_PREFIX + '/plug/vip/loop/<vip>',
+                              view_func=self.set_vip,
+                              methods=['POST'])
+        self.app.add_url_rule(rule=PATH_PREFIX + '/plug/vip/loop/<vip>',
+                              view_func=self.unset_vip,
+                              methods=['DELETE'])
         self.app.add_url_rule(rule=PATH_PREFIX + '/config',
                               view_func=self.upload_config,
                               methods=['PUT'])
@@ -163,6 +169,29 @@ class Server(object):
             return self._lvs_listener.delete_lvs_listener(object_id)
         return self._loadbalancer.delete_lb(object_id)
 
+    def set_vip(self, vip):
+        try:
+            net_info = flask.request.get_json()
+            assert type(net_info) is dict
+            assert 'subnet_cidr' in net_info
+            assert 'gateway' in net_info
+            assert 'vrrp_ip' in net_info
+            assert 'mac_address' in net_info
+        except Exception as e:
+            raise exceptions.BadRequest(
+                description='Invalid subnet information') from e
+        LOG.info('received json param net_info: %s', net_info)
+        return self._plug.plug_vip_with_cmd(vip,
+                                            net_info['mac_address'],
+                                            net_info['subnet_cidr'],
+                                            net_info.get('gateway'),
+                                            net_info.get('vrrp_ip'),
+                                            net_info.get('mtu'),
+                                            net_info.get('host_routes'))
+
+    def unset_vip(self, vip):
+        return self._plug.unplug_vip(vip)
+
     def get_details(self):
         return self._amphora_info.compile_amphora_details(
             extend_lvs_driver=self._lvs_listener)
@@ -214,8 +243,7 @@ class Server(object):
                 description='Invalid port information') from e
         return self._plug.plug_network(port_info['mac_address'],
                                        port_info.get('fixed_ips'),
-                                       port_info.get('mtu'),
-                                       port_info.get('vip_net_info'))
+                                       port_info.get('mtu'))
 
     def upload_cert(self):
         return certificate_update.upload_server_cert()

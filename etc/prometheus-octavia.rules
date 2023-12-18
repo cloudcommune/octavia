@@ -1,0 +1,99 @@
+groups:
+- name: haproxy
+  rules:
+  - alert: HaproxyHighHttp5xxErrorRateServer
+    expr: ((sum by (amphora_id, loadbalancer_name) (rate(octavia_member_http_responses_total{code="5xx"}[1m])) / sum by (amphora_id, loadbalancer_name) (rate(octavia_member_http_responses_total[1m]))) * 100) > 5
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: HAProxy high HTTP 5xx error rate server (instance {{ $labels.instance }})
+      description: "Too many HTTP requests with status 5xx (> 5%) on server {{ $labels.server }}\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyServerResponseErrors
+    expr: (sum by (amphora_id, loadbalancer_name) (rate(haproxy_server_response_errors_total[1m])) / sum by (amphora_id, loadbalancer_name) (rate(octavia_member_http_responses_total[1m]))) * 100 > 5
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: HAProxy server response errors (instance {{ $labels.instance }})
+      description: "Too many response errors to {{ $labels.server }} server (> 5%).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyBackendConnectionErrors
+    expr: sum by (amphora_id, loadbalancer_name) (rate(octavia_pool_connection_errors_total[1m])) > 100
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy backend connection errors (instance {{ $labels.instance }})
+      description: "Too many connection errors to {{ $labels.fqdn }}/{{ $labels.backend }} backend (> 100 req/s). Request throughput may be too high.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyServerConnectionErrors
+    expr: sum by (loadbalancer_name) (rate(octavia_member_connection_errors_total[1m])) > 100
+    for: 0m
+    labels:
+      severity: critical
+    annotations:
+      summary: HAProxy server connection errors (instance {{ $labels.instance }})
+      description: "Too many connection errors to {{ $labels.server }} server (> 100 req/s). Request throughput may be too high.\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyBackendMaxActiveSession
+    expr: ((sum by (loadbalancer_name) (avg_over_time(octavia_pool_max_sessions[2m])) / sum by (loadbalancer_name) (avg_over_time(octavia_pool_max_sessions[2m]))) * 100) > 80
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy backend max active session (instance {{ $labels.instance }})
+      description: "HAproxy backend {{ $labels.fqdn }}/{{ $labels.backend }} is reaching session limit (> 80%).\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyPendingRequests
+    expr: sum by (loadbalancer_name) (octavia_pool_current_queue) > 0
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy pending requests (instance {{ $labels.instance }})
+      description: "Some HAProxy requests are pending on {{ $labels.fqdn }}/{{ $labels.backend }} backend\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyRetryHigh
+    expr: sum by (loadbalancer_name) (rate(octavia_pool_retry_warnings_total[1m])) > 10
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy retry high (instance {{ $labels.instance }})
+      description: "High rate of retry on {{ $labels.fqdn }}/{{ $labels.backend }} backend\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyFrontendSecurityBlockedRequests
+    expr: sum by (loadbalancer_name) (rate(octavia_listener_requests_denied_total[2m])) > 10
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy frontend security blocked requests (instance {{ $labels.instance }})
+      description: "HAProxy is blocking requests for security reason\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: HaproxyServerHealthcheckFailure
+    expr: increase(octavia_member_check_failures_total[1m]) > 0
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy server healthcheck failure (instance {{ $labels.instance }})
+      description: "Some server healthcheck are failing on {{ $labels.server }}\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+  - alert: Load_balancer disk high
+    expr: octavia_loadbalancer_disk >= 20
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy server disk high (amphora {{ $labels.amphora_id }})
+      description: "Some server disk are high on {{ $labels.amphora_id }}"
+  - alert: Load_balancer CPU high
+    expr: octavia_loadbalancer_cpu >= 60
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy server cpu high (amphora {{ $labels.amphora_id }})
+      description: "Some server cpu are high on {{ $labels.amphora_id }}"  
+  - alert: Load_balancer mem high
+    expr: octavia_loadbalancer_mem >= 60
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: HAProxy server mem high (amphora {{ $labels.amphora_id }})
+      description: "Some server mem are high on {{ $labels.amphora_id }}" 

@@ -18,7 +18,6 @@ from unittest import mock
 from oslo_config import cfg
 from oslo_config import fixture as oslo_fixture
 from taskflow import engines as tf_engines
-from taskflow.jobs.base import Job
 
 from octavia.common import base_taskflow
 import octavia.tests.unit.base as base
@@ -120,20 +119,25 @@ class TestTaskFlowServiceController(base.TestCase):
 
     def test__wait_for_job(self):
         job1 = mock.MagicMock()
+        job1.wait.side_effect = [False, True]
         job2 = mock.MagicMock()
+        job2.wait.side_effect = [False, True]
+        job3 = mock.MagicMock()
+        job3.wait.return_value = True
         job_board = mock.MagicMock()
         job_board.iterjobs.side_effect = [
+            [job1, job2, job3],
             [job1, job2]
         ]
         self.service_controller._wait_for_job(job_board)
 
-        job1.wait.assert_called_once()
-        job2.wait.assert_called_once()
+        job1.extend_expiry.assert_called_once()
+        job2.extend_expiry.assert_called_once()
+        job3.extend_expiry.assert_not_called()
 
     @mock.patch('octavia.common.base_taskflow.RedisDynamicLoggingConductor')
     @mock.patch('octavia.common.base_taskflow.DynamicLoggingConductor')
-    @mock.patch('concurrent.futures.ThreadPoolExecutor')
-    def test_run_conductor(self, mock_threadpoolexec, dynamiccond, rediscond):
+    def test_run_conductor(self, dynamiccond, rediscond):
         self.service_controller.run_conductor("test")
         rediscond.assert_called_once_with(
             "test", self.jobboard_mock.__enter__(),
@@ -150,86 +154,3 @@ class TestTaskFlowServiceController(base.TestCase):
             "test2", self.jobboard_mock.__enter__(),
             persistence=self.persistence_mock.__enter__(),
             engine='parallel')
-
-    def test__extend_jobs(self):
-        conductor = mock.MagicMock()
-        conductor._name = 'mycontroller'
-
-        job1 = mock.MagicMock()
-        job1.expires_in.return_value = 10
-        job2 = mock.MagicMock()
-        job2.expires_in.return_value = 10
-        job3 = mock.MagicMock()
-        job3.expires_in.return_value = 30
-        self.jobboard_mock.__enter__().iterjobs.return_value = [
-            job1, job2, job3]
-
-        self.jobboard_mock.__enter__().find_owner.side_effect = [
-            'mycontroller',
-            TypeError('no owner'),
-            'mycontroller']
-
-        self.service_controller._extend_jobs(conductor, 30)
-
-        job1.extend_expiry.assert_called_once_with(30)
-        job2.extend_expiry.assert_not_called()
-        job3.extend_expiry.assert_not_called()
-
-
-class TestJobDetailsFilter(base.TestCase):
-    def test_filter(self):
-        log_filter = base_taskflow.JobDetailsFilter()
-
-        tls_container_data = {
-            'certificate': '<CERTIFICATE>',
-            'private_key': '<PRIVATE_KEY>',
-            'passphrase': '<PASSPHRASE>',
-            'intermediates': [
-                '<INTERMEDIATE1>',
-                '<INTERMEDIATE2>'
-            ]
-        }
-
-        job = mock.Mock(spec=Job)
-        job.details = {
-            'store': {
-                'listeners': [
-                    {
-                        'name': 'listener_name',
-                        'default_tls_container_data': tls_container_data
-                    }
-                ],
-                'any_recursive': {
-                    'type': [
-                        {
-                            'other_list': [
-                                tls_container_data,
-                                {
-                                    'test': tls_container_data,
-                                }
-                            ]
-                        }
-                    ]
-                }
-            }
-        }
-
-        record = mock.Mock()
-        record.args = (job, 'something')
-
-        ret = log_filter.filter(record)
-        self.assertTrue(ret)
-
-        self.assertNotIn(tls_container_data['certificate'], record.args[0])
-        self.assertNotIn(tls_container_data['private_key'], record.args[0])
-        self.assertNotIn(tls_container_data['passphrase'], record.args[0])
-        self.assertNotIn(tls_container_data['intermediates'][0],
-                         record.args[0])
-        self.assertNotIn(tls_container_data['intermediates'][1],
-                         record.args[0])
-        self.assertIn('listener_name', record.args[0])
-
-        record.args = ('arg1', 2)
-
-        ret = log_filter.filter(record)
-        self.assertTrue(ret)

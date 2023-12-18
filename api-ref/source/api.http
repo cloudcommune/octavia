@@ -1,0 +1,25 @@
+# resize a lb
+
+@token = gAAAAABihJDCDdkfIxiu6N8z3ERV1DDiEK_Tr7QNdxlt3IYNWSYMCHKW-acPzxeV163qljTtF7iW0y_oRYpz-Bo9PwSwuaEdZFAuRjenePI3N5j8BQ9ekmyDVREH9bNF-CBWBYIn0d1hP79kUcZF8e2nxRi0A2YIPmyPih2libBshR3wb18-f8Q
+
+### get all
+GET http://10.3.12.151:9876/v2.0/lbaas/loadbalancers
+Accept: application/json
+User-Agent: openstacksdk/0.36.5 keystoneauth1/3.17.4 python-requests/2.22.0 CPython/3.6.8
+X-Auth-Token: {{ token }}
+
+###get one
+GET http://10.3.12.151:9876/v2.0/lbaas/loadbalancers/00368c07-c48d-47b6-91ad-f9f7c3edb942
+Accept: application/json
+User-Agent: openstacksdk/0.36.5 keystoneauth1/3.17.4 python-requests/2.22.0 CPython/3.6.8
+X-Auth-Token: {{ token }}
+
+### resize lb
+PUT  http://10.3.12.151:9876/v2.0/lbaas/loadbalancers/00368c07-c48d-47b6-91ad-f9f7c3edb942/resize
+Accept: application/json
+User-Agent: openstacksdk/0.36.5 keystoneauth1/3.17.4 python-requests/2.22.0 CPython/3.6.8
+X-Auth-Token: {{ token }}
+
+{
+     "flavor_id": "8dbabc58-8f71-4dab-8be6-df11cc3e3811"
+}

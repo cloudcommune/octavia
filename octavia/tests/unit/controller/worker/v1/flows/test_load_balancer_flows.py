@@ -155,17 +155,12 @@ class TestLoadBalancerFlows(base.TestCase):
 
         self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
         self.assertIn(constants.UPDATE_DICT, amp_flow.requires)
-        self.assertIn(constants.AMPHORA_ID, amp_flow.requires)
-
-        self.assertIn(constants.AMPHORAE, amp_flow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, amp_flow.provides)
-        self.assertIn(constants.AMP_VRRP_INT, amp_flow.provides)
-        self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, amp_flow.provides)
         self.assertIn(constants.LOADBALANCER, amp_flow.provides)
 
-        self.assertEqual(5, len(amp_flow.provides))
-        self.assertEqual(3, len(amp_flow.requires))
+        self.assertEqual(4, len(amp_flow.provides))
+        self.assertEqual(2, len(amp_flow.requires))
 
+        # Test mark_active=False
         amp_flow = self.LBFlow.get_post_lb_amp_association_flow(
             '123', constants.TOPOLOGY_ACTIVE_STANDBY)
 
@@ -173,16 +168,10 @@ class TestLoadBalancerFlows(base.TestCase):
 
         self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
         self.assertIn(constants.UPDATE_DICT, amp_flow.requires)
-        self.assertIn(constants.AMPHORA_ID, amp_flow.requires)
-
-        self.assertIn(constants.AMPHORAE, amp_flow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, amp_flow.provides)
-        self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, amp_flow.provides)
-        self.assertIn(constants.AMP_VRRP_INT, amp_flow.provides)
         self.assertIn(constants.LOADBALANCER, amp_flow.provides)
 
-        self.assertEqual(5, len(amp_flow.provides))
-        self.assertEqual(3, len(amp_flow.requires))
+        self.assertEqual(4, len(amp_flow.provides))
+        self.assertEqual(2, len(amp_flow.requires))
 
     def test_get_create_load_balancer_flows_single_listeners(
             self, mock_get_net_driver):
@@ -194,28 +183,22 @@ class TestLoadBalancerFlows(base.TestCase):
         self.assertIsInstance(create_flow, flow.Flow)
         self.assertIn(constants.LOADBALANCER_ID, create_flow.requires)
         self.assertIn(constants.UPDATE_DICT, create_flow.requires)
-        self.assertIn(constants.BUILD_TYPE_PRIORITY, create_flow.requires)
-        self.assertIn(constants.FLAVOR, create_flow.requires)
-        self.assertIn(constants.AVAILABILITY_ZONE, create_flow.requires)
-        self.assertIn(constants.SERVER_GROUP_ID, create_flow.requires)
 
         self.assertIn(constants.LISTENERS, create_flow.provides)
-        self.assertIn(constants.SUBNET, create_flow.provides)
         self.assertIn(constants.AMPHORA, create_flow.provides)
         self.assertIn(constants.AMPHORA_ID, create_flow.provides)
         self.assertIn(constants.COMPUTE_ID, create_flow.provides)
         self.assertIn(constants.COMPUTE_OBJ, create_flow.provides)
         self.assertIn(constants.LOADBALANCER, create_flow.provides)
         self.assertIn(constants.DELTAS, create_flow.provides)
-        self.assertIn(constants.UPDATED_PORTS, create_flow.provides)
+        self.assertIn(constants.ADDED_PORTS, create_flow.provides)
         self.assertIn(constants.VIP, create_flow.provides)
         self.assertIn(constants.AMP_DATA, create_flow.provides)
-        self.assertIn(constants.SERVER_PEM, create_flow.provides)
         self.assertIn(constants.AMPHORA_NETWORK_CONFIG, create_flow.provides)
-        self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, create_flow.provides)
 
         self.assertEqual(6, len(create_flow.requires))
-        self.assertEqual(14, len(create_flow.provides))
+        self.assertEqual(13, len(create_flow.provides),
+                         create_flow.provides)
 
     def test_get_create_load_balancer_flows_active_standby_listeners(
             self, mock_get_net_driver):
@@ -231,19 +214,18 @@ class TestLoadBalancerFlows(base.TestCase):
         self.assertIn(constants.LISTENERS, create_flow.provides)
         self.assertIn(constants.AMPHORA, create_flow.provides)
         self.assertIn(constants.AMPHORA_ID, create_flow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, create_flow.provides)
         self.assertIn(constants.COMPUTE_ID, create_flow.provides)
         self.assertIn(constants.COMPUTE_OBJ, create_flow.provides)
         self.assertIn(constants.LOADBALANCER, create_flow.provides)
         self.assertIn(constants.DELTAS, create_flow.provides)
-        self.assertIn(constants.UPDATED_PORTS, create_flow.provides)
+        self.assertIn(constants.ADDED_PORTS, create_flow.provides)
         self.assertIn(constants.VIP, create_flow.provides)
         self.assertIn(constants.AMP_DATA, create_flow.provides)
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG,
                       create_flow.provides)
 
         self.assertEqual(6, len(create_flow.requires))
-        self.assertEqual(17, len(create_flow.provides),
+        self.assertEqual(16, len(create_flow.provides),
                          create_flow.provides)
 
     def _test_get_failover_LB_flow_single(self, amphorae):
@@ -261,7 +243,7 @@ class TestLoadBalancerFlows(base.TestCase):
         self.assertIn(constants.LOADBALANCER, failover_flow.requires)
         self.assertIn(constants.LOADBALANCER_ID, failover_flow.requires)
 
-        self.assertIn(constants.UPDATED_PORTS, failover_flow.provides)
+        self.assertIn(constants.ADDED_PORTS, failover_flow.provides)
         self.assertIn(constants.AMPHORA, failover_flow.provides)
         self.assertIn(constants.AMPHORA_ID, failover_flow.provides)
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG,
@@ -330,12 +312,11 @@ class TestLoadBalancerFlows(base.TestCase):
         self.assertIn(constants.LOADBALANCER, failover_flow.requires)
         self.assertIn(constants.LOADBALANCER_ID, failover_flow.requires)
 
-        self.assertIn(constants.UPDATED_PORTS, failover_flow.provides)
+        self.assertIn(constants.ADDED_PORTS, failover_flow.provides)
         self.assertIn(constants.AMP_VRRP_INT, failover_flow.provides)
         self.assertIn(constants.AMPHORA, failover_flow.provides)
         self.assertIn(constants.AMPHORA_ID, failover_flow.provides)
         self.assertIn(constants.AMPHORAE, failover_flow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, failover_flow.provides)
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG,
                       failover_flow.provides)
         self.assertIn(constants.BASE_PORT, failover_flow.provides)
@@ -353,7 +334,7 @@ class TestLoadBalancerFlows(base.TestCase):
 
         self.assertEqual(6, len(failover_flow.requires),
                          failover_flow.requires)
-        self.assertEqual(17, len(failover_flow.provides),
+        self.assertEqual(16, len(failover_flow.provides),
                          failover_flow.provides)
 
     def test_get_failover_LB_flow_no_amps_act_stdby(self, mock_get_net_driver):
@@ -442,3 +423,126 @@ class TestLoadBalancerFlows(base.TestCase):
 
         self._test_get_failover_LB_flow_no_amps_act_stdby([amphora_mock,
                                                            amphora2_mock])
+
+    def test_get_create_multi_active_load_balancer_flow(
+            self, mock_get_net_driver):
+        amp_flow = self.LBFlow.get_create_load_balancer_flow(
+            constants.TOPOLOGY_MULTI_ACTIVE)
+        self.assertIsInstance(amp_flow, flow.Flow)
+        self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
+        self.assertIn(constants.AMPHORA, amp_flow.provides)
+        self.assertIn(constants.AMPHORA_ID, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_ID, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_OBJ, amp_flow.provides)
+
+    def test_get_create_anti_affinity_multi_active_load_balancer_flow(
+            self, mock_get_net_driver):
+        self.conf.config(group="nova", enable_anti_affinity=True)
+
+        self._LBFlow = load_balancer_flows.LoadBalancerFlows()
+        amp_flow = self._LBFlow.get_create_load_balancer_flow(
+            constants.TOPOLOGY_MULTI_ACTIVE)
+        self.assertIsInstance(amp_flow, flow.Flow)
+        self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
+        self.assertIn(constants.SERVER_GROUP_ID, amp_flow.provides)
+        self.assertIn(constants.AMPHORA, amp_flow.provides)
+        self.assertIn(constants.AMPHORA_ID, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_ID, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_OBJ, amp_flow.provides)
+        self.conf.config(group="nova", enable_anti_affinity=False)
+
+    def test_get_create_load_balancer_flows_multi_type_listeners(
+            self, mock_get_net_driver):
+        create_flow = (
+            self.LBFlow.get_create_load_balancer_flow(
+                constants.TOPOLOGY_MULTI_ACTIVE, True
+            )
+        )
+        self.assertIsInstance(create_flow, flow.Flow)
+        self.assertIn(constants.LOADBALANCER_ID, create_flow.requires)
+        self.assertIn(constants.UPDATE_DICT, create_flow.requires)
+        self.assertEqual(6, len(create_flow.requires))
+        self.assertEqual(15, len(create_flow.provides),
+                         create_flow.provides)
+
+    def _test_get_failover_LB_flow_no_amps_multi_type(self, amphorae):
+        lb_mock = mock.MagicMock()
+        lb_mock.id = uuidutils.generate_uuid()
+        lb_mock.topology = constants.TOPOLOGY_MULTI_ACTIVE
+
+        failover_flow = self.LBFlow.get_failover_LB_flow(amphorae, lb_mock)
+
+        self.assertIsInstance(failover_flow, flow.Flow)
+
+        self.assertIn(constants.AVAILABILITY_ZONE, failover_flow.requires)
+        self.assertIn(constants.BUILD_TYPE_PRIORITY, failover_flow.requires)
+        self.assertIn(constants.FLAVOR, failover_flow.requires)
+        self.assertIn(constants.LOADBALANCER, failover_flow.requires)
+        self.assertIn(constants.LOADBALANCER_ID, failover_flow.requires)
+
+        self.assertIn(constants.ADDED_PORTS, failover_flow.provides)
+        self.assertIn(constants.AMPHORA, failover_flow.provides)
+        self.assertIn(constants.AMPHORA_ID, failover_flow.provides)
+        self.assertIn(constants.AMPHORAE_NETWORK_CONFIG,
+                      failover_flow.provides)
+        self.assertIn(constants.BASE_PORT, failover_flow.provides)
+        self.assertIn(constants.COMPUTE_ID, failover_flow.provides)
+        self.assertIn(constants.COMPUTE_OBJ, failover_flow.provides)
+        self.assertIn(constants.DELTA, failover_flow.provides)
+        self.assertIn(constants.LOADBALANCER, failover_flow.provides)
+        self.assertIn(constants.SERVER_PEM, failover_flow.provides)
+        self.assertIn(constants.VIP, failover_flow.provides)
+        self.assertIn(constants.VIP_SG_ID, failover_flow.provides)
+
+        self.assertEqual(15, len(failover_flow.provides),
+                         failover_flow.provides)
+
+    def test_get_failover_LB_flow_no_amps_multi_type(self,
+                                                     mock_get_net_driver):
+        self._test_get_failover_LB_flow_no_amps_multi_type([])
+
+    def test_get_failover_LB_flow_one_amps_multi_type(self, amphorae):
+        amphora_mock = mock.MagicMock()
+        amphora_mock.role = constants.ROLE_MULTI
+        amphora_mock.lb_network_id = uuidutils.generate_uuid()
+        amphora_mock.compute_id = uuidutils.generate_uuid()
+        amphora_mock.vrrp_port_id = None
+        amphora_mock.vrrp_ip = None
+
+        self._test_get_failover_LB_flow_no_amps_multi_type([amphora_mock])
+
+    def test_get_failover_LB_flow_two_amps_multi_active_1(
+            self, mock_get_net_driver):
+        amphora_mock = mock.MagicMock()
+        amphora_mock.role = constants.ROLE_MULTI
+        amphora_mock.lb_network_id = uuidutils.generate_uuid()
+        amphora_mock.compute_id = uuidutils.generate_uuid()
+        amphora_mock.vrrp_port_id = uuidutils.generate_uuid()
+        amphora_mock.vrrp_ip = '192.0.2.46'
+        amphora2_mock = mock.MagicMock()
+        amphora2_mock.role = constants.ROLE_MULTI
+        amphora2_mock.lb_network_id = uuidutils.generate_uuid()
+        amphora2_mock.compute_id = uuidutils.generate_uuid()
+        amphora2_mock.vrrp_port_id = uuidutils.generate_uuid()
+        amphora2_mock.vrrp_ip = '2001:db8::46'
+
+        self._test_get_failover_LB_flow_no_amps_multi_type([amphora_mock,
+                                                            amphora2_mock])
+
+    def test_get_failover_LB_flow_two_amps_multi_active_2(
+            self, mock_get_net_driver):
+        amphora_mock = mock.MagicMock()
+        amphora_mock.role = constants.ROLE_MULTI
+        amphora_mock.lb_network_id = uuidutils.generate_uuid()
+        amphora_mock.compute_id = uuidutils.generate_uuid()
+        amphora_mock.vrrp_port_id = uuidutils.generate_uuid()
+        amphora_mock.vrrp_ip = '192.0.2.46'
+        amphora2_mock = mock.MagicMock()
+        amphora2_mock.role = constants.ROLE_MULTI
+        amphora2_mock.lb_network_id = uuidutils.generate_uuid()
+        amphora2_mock.compute_id = uuidutils.generate_uuid()
+        amphora2_mock.vrrp_port_id = uuidutils.generate_uuid()
+        amphora2_mock.vrrp_ip = '2001:db8::46'
+
+        self._test_get_failover_LB_flow_no_amps_multi_type([amphora_mock,
+                                                            amphora2_mock])

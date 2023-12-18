@@ -19,7 +19,6 @@ from cryptography import fernet
 from oslo_config import cfg
 from oslo_log import log as logging
 from stevedore import driver as stevedore_driver
-from taskflow import retry
 from taskflow import task
 from taskflow.types import failure
 import tenacity
@@ -52,32 +51,13 @@ class BaseComputeTask(task.Task):
         self.rate_limit = amphora_rate_limit.AmphoraBuildRateLimit()
 
 
-class ComputeRetry(retry.Times):
-
-    def on_failure(self, history, *args, **kwargs):
-        last_errors = history[-1][1]
-        max_retry_attempt = CONF.controller_worker.amp_active_retries
-        for task_name, ex_info in last_errors.items():
-            if len(history) <= max_retry_attempt:
-                # When taskflow persistance is enabled and flow/task state is
-                # saved in the backend. If flow(task) is restored(restart of
-                # worker,etc) we are getting ex_info as None - we need to RETRY
-                # task to check its real state.
-                if ex_info is None or ex_info._exc_info is None:
-                    return retry.RETRY
-                excp = ex_info._exc_info[1]
-                if isinstance(excp, exceptions.ComputeWaitTimeoutException):
-                    return retry.RETRY
-
-        return retry.REVERT_ALL
-
-
 class ComputeCreate(BaseComputeTask):
     """Create the compute instance for a new amphora."""
 
     def execute(self, amphora_id, server_group_id, config_drive_files=None,
                 build_type_priority=constants.LB_CREATE_NORMAL_PRIORITY,
-                ports=None, flavor=None, availability_zone=None):
+                ports=None, flavor=None, availability_zone=None,
+                loadbalancer_topology=None, snat_ip=None, dhcp_ip=None):
         """Create an amphora
 
         :param availability_zone: availability zone metadata dictionary
@@ -102,7 +82,10 @@ class ComputeCreate(BaseComputeTask):
             amp_image_tag = flavor.get(
                 constants.AMP_IMAGE_TAG, CONF.controller_worker.amp_image_tag)
         else:
-            topology = CONF.controller_worker.loadbalancer_topology
+            if loadbalancer_topology:
+                topology = loadbalancer_topology
+            else:
+                topology = CONF.controller_worker.loadbalancer_topology
             amp_compute_flavor = CONF.controller_worker.amp_flavor_id
             amp_image_tag = CONF.controller_worker.amp_image_tag
 
@@ -121,8 +104,8 @@ class ComputeCreate(BaseComputeTask):
 
             agent_cfg = agent_jinja_cfg.AgentJinjaTemplater()
             config_drive_files['/etc/octavia/amphora-agent.conf'] = (
-                agent_cfg.build_agent_config(amphora_id, topology))
-
+                agent_cfg.build_agent_config(amphora_id, topology,
+                                             dhcp_ip, snat_ip))
             logging_cfg = logging_jinja_cfg.LoggingJinjaTemplater(
                 CONF.amphora_agent.logging_template_override)
             config_drive_files['/etc/rsyslog.d/10-rsyslog.conf'] = (
@@ -177,7 +160,8 @@ class ComputeCreate(BaseComputeTask):
 class CertComputeCreate(ComputeCreate):
     def execute(self, amphora_id, server_pem, server_group_id,
                 build_type_priority=constants.LB_CREATE_NORMAL_PRIORITY,
-                ports=None, flavor=None, availability_zone=None):
+                ports=None, flavor=None, availability_zone=None,
+                loadbalancer_topology=None, snat_ip=None, dhcp_ip=None):
         """Create an amphora
 
         :param availability_zone: availability zone metadata dictionary
@@ -194,13 +178,15 @@ class CertComputeCreate(ComputeCreate):
         fer = fernet.Fernet(key)
         config_drive_files = {
             '/etc/octavia/certs/server.pem': fer.decrypt(
-                server_pem.encode("utf-8")).decode("utf-8"),
+                server_pem.encode("utf-8")),
             '/etc/octavia/certs/client_ca.pem': ca}
         return super().execute(
             amphora_id, config_drive_files=config_drive_files,
             build_type_priority=build_type_priority,
             server_group_id=server_group_id, ports=ports, flavor=flavor,
-            availability_zone=availability_zone)
+            availability_zone=availability_zone,
+            loadbalancer_topology=loadbalancer_topology,
+            snat_ip=snat_ip, dhcp_ip=dhcp_ip)
 
 
 class DeleteAmphoraeOnLoadBalancer(BaseComputeTask):
@@ -272,7 +258,7 @@ class ComputeDelete(BaseComputeTask):
                 raise
 
 
-class ComputeWait(BaseComputeTask):
+class ComputeActiveWait(BaseComputeTask):
     """Wait for the compute driver to mark the amphora active."""
 
     def execute(self, compute_id, amphora_id, availability_zone):
@@ -289,16 +275,16 @@ class ComputeWait(BaseComputeTask):
             amp_network = availability_zone.get(constants.MANAGEMENT_NETWORK)
         else:
             amp_network = None
+        for i in range(CONF.controller_worker.amp_active_retries):
+            amp, fault = self.compute.get_amphora(compute_id, amp_network)
+            if amp.status == constants.ACTIVE:
+                if CONF.haproxy_amphora.build_rate_limit != -1:
+                    self.rate_limit.remove_from_build_req_queue(amphora_id)
+                return amp.to_dict()
+            if amp.status == constants.ERROR:
+                raise exceptions.ComputeBuildException(fault=fault)
+            time.sleep(CONF.controller_worker.amp_active_wait_sec)
 
-        amp, fault = self.compute.get_amphora(compute_id, amp_network)
-        if amp.status == constants.ACTIVE:
-            if CONF.haproxy_amphora.build_rate_limit != -1:
-                self.rate_limit.remove_from_build_req_queue(amphora_id)
-            return amp.to_dict()
-        if amp.status == constants.ERROR:
-            raise exceptions.ComputeBuildException(fault=fault)
-
-        time.sleep(CONF.controller_worker.amp_active_wait_sec)
         raise exceptions.ComputeWaitTimeoutException(id=compute_id)
 
 

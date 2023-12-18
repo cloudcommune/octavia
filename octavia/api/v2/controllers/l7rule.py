@@ -112,11 +112,11 @@ class L7RuleController(base.BaseController):
             return self.repositories.l7rule.create(lock_session, **l7rule_dict)
         except odb_exceptions.DBDuplicateEntry as e:
             raise exceptions.IDAlreadyExists() from e
-        except odb_exceptions.DBReferenceError as e:
-            raise exceptions.InvalidOption(value=l7rule_dict.get(e.key),
-                                           option=e.key) from e
         except odb_exceptions.DBError as e:
-            raise exceptions.APIException() from e
+            # TODO(blogan): will have to do separate validation protocol
+            # before creation or update since the exception messages
+            # do not give any information as to what constraint failed
+            raise exceptions.InvalidOption(value='', option='') from e
 
     @wsme_pecan.wsexpose(l7rule_types.L7RuleRootResponse,
                          body=l7rule_types.L7RuleRootPOST, status_code=201)
@@ -157,7 +157,7 @@ class L7RuleController(base.BaseController):
             l7rule_dict = db_prepare.create_l7rule(
                 l7rule.to_dict(render_unsets=True), self.l7policy_id)
 
-            self._test_lb_listener_policy_statuses(lock_session)
+            self._test_lb_listener_policy_statuses(context.session)
 
             db_l7rule = self._validate_create_l7rule(lock_session, l7rule_dict)
 

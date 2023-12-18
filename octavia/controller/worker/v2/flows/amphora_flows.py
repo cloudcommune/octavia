@@ -57,14 +57,9 @@ class AmphoraFlows(object):
             provides=constants.COMPUTE_ID))
         create_amphora_flow.add(database_tasks.MarkAmphoraBootingInDB(
             requires=(constants.AMPHORA_ID, constants.COMPUTE_ID)))
-        retry_subflow = linear_flow.Flow(
-            constants.COMPUTE_CREATE_RETRY_SUBFLOW,
-            retry=compute_tasks.ComputeRetry())
-        retry_subflow.add(
-            compute_tasks.ComputeWait(
-                requires=(constants.COMPUTE_ID, constants.AMPHORA_ID),
-                provides=constants.COMPUTE_OBJ))
-        create_amphora_flow.add(retry_subflow)
+        create_amphora_flow.add(compute_tasks.ComputeActiveWait(
+            requires=(constants.COMPUTE_ID, constants.AMPHORA_ID),
+            provides=constants.COMPUTE_OBJ))
         create_amphora_flow.add(database_tasks.UpdateAmphoraInfo(
             requires=(constants.AMPHORA_ID, constants.COMPUTE_OBJ),
             provides=constants.AMPHORA))
@@ -86,6 +81,7 @@ class AmphoraFlows(object):
 
         return create_amphora_flow
 
+    # TODO(wuchunyang): missing _get_post_map_lb_subflow function
     def get_amphora_for_lb_subflow(self, prefix, role):
         """Create a new amphora for lb."""
 
@@ -105,20 +101,34 @@ class AmphoraFlows(object):
                 name=sf_name + '-' + constants.UPDATE_CERT_EXPIRATION,
                 requires=(constants.AMPHORA_ID, constants.SERVER_PEM)))
 
-        create_amp_for_lb_subflow.add(compute_tasks.CertComputeCreate(
-            name=sf_name + '-' + constants.CERT_COMPUTE_CREATE,
-            requires=(constants.AMPHORA_ID, constants.SERVER_PEM,
-                      constants.BUILD_TYPE_PRIORITY,
-                      constants.SERVER_GROUP_ID,
-                      constants.FLAVOR, constants.AVAILABILITY_ZONE),
-            provides=constants.COMPUTE_ID))
+        if role == constants.ROLE_MULTI:
+            create_amp_for_lb_subflow.add(compute_tasks.CertComputeCreate(
+                name=sf_name + '-' + constants.CERT_COMPUTE_CREATE,
+                requires=(constants.AMPHORA_ID, constants.SERVER_PEM,
+                          constants.BUILD_TYPE_PRIORITY,
+                          constants.SERVER_GROUP_ID,
+                          constants.FLAVOR, constants.AVAILABILITY_ZONE,
+                          constants.GATEWAY_IP),
+                provides=constants.COMPUTE_ID))
+        else:
+            create_amp_for_lb_subflow.add(compute_tasks.CertComputeCreate(
+                name=sf_name + '-' + constants.CERT_COMPUTE_CREATE,
+                requires=(constants.AMPHORA_ID, constants.SERVER_PEM,
+                          constants.BUILD_TYPE_PRIORITY,
+                          constants.SERVER_GROUP_ID,
+                          constants.FLAVOR, constants.AVAILABILITY_ZONE),
+                provides=constants.COMPUTE_ID))
         create_amp_for_lb_subflow.add(database_tasks.UpdateAmphoraComputeId(
             name=sf_name + '-' + constants.UPDATE_AMPHORA_COMPUTEID,
             requires=(constants.AMPHORA_ID, constants.COMPUTE_ID)))
         create_amp_for_lb_subflow.add(database_tasks.MarkAmphoraBootingInDB(
             name=sf_name + '-' + constants.MARK_AMPHORA_BOOTING_INDB,
             requires=(constants.AMPHORA_ID, constants.COMPUTE_ID)))
-        create_amp_for_lb_subflow.add(self._retry_compute_wait_flow(sf_name))
+        create_amp_for_lb_subflow.add(compute_tasks.ComputeActiveWait(
+            name=sf_name + '-' + constants.COMPUTE_WAIT,
+            requires=(constants.COMPUTE_ID, constants.AMPHORA_ID,
+                      constants.AVAILABILITY_ZONE),
+            provides=constants.COMPUTE_OBJ))
         create_amp_for_lb_subflow.add(database_tasks.UpdateAmphoraInfo(
             name=sf_name + '-' + constants.UPDATE_AMPHORA_INFO,
             requires=(constants.AMPHORA_ID, constants.COMPUTE_OBJ),
@@ -139,6 +149,10 @@ class AmphoraFlows(object):
             create_amp_for_lb_subflow.add(database_tasks.MarkAmphoraBackupInDB(
                 name=sf_name + '-' + constants.MARK_AMP_BACKUP_INDB,
                 requires=constants.AMPHORA))
+        elif role == constants.ROLE_MULTI:
+            create_amp_for_lb_subflow.add(database_tasks.MarkAmphoraMultiInDB(
+                name=sf_name + '-' + constants.MARK_AMP_MULTI_INDB,
+                requires=constants.AMPHORA))
         elif role == constants.ROLE_STANDALONE:
             create_amp_for_lb_subflow.add(
                 database_tasks.MarkAmphoraStandAloneInDB(
@@ -146,18 +160,6 @@ class AmphoraFlows(object):
                     requires=constants.AMPHORA))
 
         return create_amp_for_lb_subflow
-
-    def _retry_compute_wait_flow(self, sf_name):
-        retry_task = sf_name + '-' + constants.COMPUTE_WAIT
-        retry_subflow = linear_flow.Flow(
-            sf_name + '-' + constants.COMPUTE_CREATE_RETRY_SUBFLOW,
-            retry=compute_tasks.ComputeRetry())
-        retry_subflow.add(
-            compute_tasks.ComputeWait(
-                name=retry_task,
-                requires=(constants.COMPUTE_ID, constants.AMPHORA_ID),
-                provides=constants.COMPUTE_OBJ))
-        return retry_subflow
 
     def _retry_flow(self, sf_name):
         retry_task = sf_name + '-' + constants.AMP_COMPUTE_CONNECTIVITY_WAIT
@@ -226,8 +228,7 @@ class AmphoraFlows(object):
         return delete_amphora_flow
 
     def get_vrrp_subflow(self, prefix, timeout_dict=None,
-                         create_vrrp_group=True,
-                         get_amphorae_status=True):
+                         create_vrrp_group=True):
         sf_name = prefix + '-' + constants.GET_VRRP_SUBFLOW
         vrrp_subflow = linear_flow.Flow(sf_name)
 
@@ -243,17 +244,6 @@ class AmphoraFlows(object):
             requires=constants.LOADBALANCER_ID,
             provides=constants.AMPHORAE_NETWORK_CONFIG))
 
-        if get_amphorae_status:
-            # Get the amphorae_status dict in case the caller hasn't fetched
-            # it yet.
-            vrrp_subflow.add(
-                amphora_driver_tasks.AmphoraeGetConnectivityStatus(
-                    name=constants.AMPHORAE_GET_CONNECTIVITY_STATUS,
-                    requires=constants.AMPHORAE,
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
-                    inject={constants.TIMEOUT_DICT: timeout_dict},
-                    provides=constants.AMPHORAE_STATUS))
-
         # VRRP update needs to be run on all amphora to update
         # their peer configurations. So parallelize this with an
         # unordered subflow.
@@ -264,8 +254,7 @@ class AmphoraFlows(object):
 
         amp_0_subflow.add(amphora_driver_tasks.AmphoraIndexUpdateVRRPInterface(
             name=sf_name + '-0-' + constants.AMP_UPDATE_VRRP_INTF,
-            requires=(constants.AMPHORAE, constants.AMPHORAE_STATUS),
-            rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+            requires=constants.AMPHORAE,
             inject={constants.AMPHORA_INDEX: 0,
                     constants.TIMEOUT_DICT: timeout_dict},
             provides=constants.AMP_VRRP_INT))
@@ -274,15 +263,13 @@ class AmphoraFlows(object):
             name=sf_name + '-0-' + constants.AMP_VRRP_UPDATE,
             requires=(constants.LOADBALANCER_ID,
                       constants.AMPHORAE_NETWORK_CONFIG, constants.AMPHORAE,
-                      constants.AMPHORAE_STATUS, constants.AMP_VRRP_INT),
-            rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+                      constants.AMP_VRRP_INT),
             inject={constants.AMPHORA_INDEX: 0,
                     constants.TIMEOUT_DICT: timeout_dict}))
 
         amp_0_subflow.add(amphora_driver_tasks.AmphoraIndexVRRPStart(
             name=sf_name + '-0-' + constants.AMP_VRRP_START,
-            requires=(constants.AMPHORAE, constants.AMPHORAE_STATUS),
-            rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+            requires=constants.AMPHORAE,
             inject={constants.AMPHORA_INDEX: 0,
                     constants.TIMEOUT_DICT: timeout_dict}))
 
@@ -290,8 +277,7 @@ class AmphoraFlows(object):
 
         amp_1_subflow.add(amphora_driver_tasks.AmphoraIndexUpdateVRRPInterface(
             name=sf_name + '-1-' + constants.AMP_UPDATE_VRRP_INTF,
-            requires=(constants.AMPHORAE, constants.AMPHORAE_STATUS),
-            rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+            requires=constants.AMPHORAE,
             inject={constants.AMPHORA_INDEX: 1,
                     constants.TIMEOUT_DICT: timeout_dict},
             provides=constants.AMP_VRRP_INT))
@@ -300,14 +286,12 @@ class AmphoraFlows(object):
             name=sf_name + '-1-' + constants.AMP_VRRP_UPDATE,
             requires=(constants.LOADBALANCER_ID,
                       constants.AMPHORAE_NETWORK_CONFIG, constants.AMPHORAE,
-                      constants.AMPHORAE_STATUS, constants.AMP_VRRP_INT),
-            rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+                      constants.AMP_VRRP_INT),
             inject={constants.AMPHORA_INDEX: 1,
                     constants.TIMEOUT_DICT: timeout_dict}))
         amp_1_subflow.add(amphora_driver_tasks.AmphoraIndexVRRPStart(
             name=sf_name + '-1-' + constants.AMP_VRRP_START,
-            requires=(constants.AMPHORAE, constants.AMPHORAE_STATUS),
-            rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+            requires=constants.AMPHORAE,
             inject={constants.AMPHORA_INDEX: 1,
                     constants.TIMEOUT_DICT: timeout_dict}))
 
@@ -318,6 +302,7 @@ class AmphoraFlows(object):
 
         return vrrp_subflow
 
+    #TODO(wuchunyang): Missing _finalize_flow function at line 266
     def cert_rotate_amphora_flow(self):
         """Implement rotation for amphora's cert.
 
@@ -425,26 +410,33 @@ class AmphoraFlows(object):
                 name=prefix + '-' + constants.ADMIN_DOWN_PORT,
                 inject={constants.PORT_ID: failed_amp_vrrp_port_id}))
 
-        amp_for_failover_flow.add(amphora_driver_tasks.AmphoraPostVIPPlug(
-            name=prefix + '-' + constants.AMPHORA_POST_VIP_PLUG,
-            requires=(constants.AMPHORA, constants.LOADBALANCER,
-                      constants.AMPHORAE_NETWORK_CONFIG)))
-
+        if role == constants.ROLE_MULTI:
+            amp_for_failover_flow.add(
+                amphora_driver_tasks.AmphoraPostLoopVipPlug(
+                    name=sf_name + '-' + constants.AMP_POST_VIP_PLUG,
+                    requires=(constants.AMPHORA, constants.LOADBALANCER,
+                              constants.AMPHORAE_NETWORK_CONFIG)))
+        else:
+            amp_for_failover_flow.add(amphora_driver_tasks.AmphoraPostVIPPlug(
+                name=sf_name + '-' + constants.AMP_POST_VIP_PLUG,
+                requires=(constants.AMPHORA, constants.LOADBALANCER,
+                          constants.AMPHORAE_NETWORK_CONFIG)))
         # Plug member ports
         amp_for_failover_flow.add(network_tasks.CalculateAmphoraDelta(
             name=prefix + '-' + constants.CALCULATE_AMPHORA_DELTA,
             requires=(constants.LOADBALANCER, constants.AMPHORA,
-                      constants.AVAILABILITY_ZONE),
+                      constants.AVAILABILITY_ZONE, constants.VRRP_PORT),
+            rebind={constants.VRRP_PORT: constants.BASE_PORT},
             provides=constants.DELTA))
 
         amp_for_failover_flow.add(network_tasks.HandleNetworkDelta(
             name=prefix + '-' + constants.HANDLE_NETWORK_DELTA,
             requires=(constants.AMPHORA, constants.DELTA),
-            provides=constants.UPDATED_PORTS))
+            provides=constants.ADDED_PORTS))
 
         amp_for_failover_flow.add(amphora_driver_tasks.AmphoraePostNetworkPlug(
             name=prefix + '-' + constants.AMPHORAE_POST_NETWORK_PLUG,
-            requires=(constants.LOADBALANCER, constants.UPDATED_PORTS)))
+            requires=(constants.LOADBALANCER, constants.ADDED_PORTS)))
 
         return amp_for_failover_flow
 
@@ -555,14 +547,6 @@ class AmphoraFlows(object):
             constants.CONN_RETRY_INTERVAL:
                 CONF.haproxy_amphora.active_connection_retry_interval}
 
-        failover_amp_flow.add(
-            amphora_driver_tasks.AmphoraeGetConnectivityStatus(
-                name=constants.AMPHORAE_GET_CONNECTIVITY_STATUS,
-                requires=constants.AMPHORAE,
-                rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
-                inject={constants.TIMEOUT_DICT: timeout_dict},
-                provides=constants.AMPHORAE_STATUS))
-
         # Listeners update needs to be run on all amphora to update
         # their peer configurations. So parallelize this with an
         # unordered subflow.
@@ -573,9 +557,7 @@ class AmphoraFlows(object):
             update_amps_subflow.add(
                 amphora_driver_tasks.AmphoraIndexListenerUpdate(
                     name=str(amp_index) + '-' + constants.AMP_LISTENER_UPDATE,
-                    requires=(constants.LOADBALANCER, constants.AMPHORAE,
-                              constants.AMPHORAE_STATUS),
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+                    requires=(constants.LOADBALANCER, constants.AMPHORAE),
                     inject={constants.AMPHORA_INDEX: amp_index,
                             constants.TIMEOUT_DICT: timeout_dict}))
 
@@ -585,8 +567,7 @@ class AmphoraFlows(object):
         if lb_amp_count == 2:
             failover_amp_flow.add(
                 self.get_vrrp_subflow(constants.GET_VRRP_SUBFLOW,
-                                      timeout_dict, create_vrrp_group=False,
-                                      get_amphorae_status=False))
+                                      timeout_dict, create_vrrp_group=False))
 
         # Reload the listener. This needs to be done here because
         # it will create the required haproxy check scripts for
@@ -602,9 +583,7 @@ class AmphoraFlows(object):
                 amphora_driver_tasks.AmphoraIndexListenersReload(
                     name=(str(amp_index) + '-' +
                           constants.AMPHORA_RELOAD_LISTENER),
-                    requires=(constants.LOADBALANCER, constants.AMPHORAE,
-                              constants.AMPHORAE_STATUS),
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
+                    requires=(constants.LOADBALANCER, constants.AMPHORAE),
                     inject={constants.AMPHORA_INDEX: amp_index,
                             constants.TIMEOUT_DICT: timeout_dict}))
 

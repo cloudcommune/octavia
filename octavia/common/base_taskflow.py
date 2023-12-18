@@ -16,7 +16,6 @@
 import concurrent.futures
 import datetime
 import functools
-import time
 
 from oslo_config import cfg
 from oslo_log import log
@@ -24,14 +23,12 @@ from oslo_utils import uuidutils
 from taskflow.conductors.backends import impl_blocking
 from taskflow import engines
 from taskflow import exceptions as taskflow_exc
-from taskflow.jobs.base import Job
 from taskflow.listeners import base
 from taskflow.listeners import logging
 from taskflow.persistence import models
 from taskflow import states
 
-from octavia.amphorae.driver_exceptions import exceptions as drv_exceptions
-from octavia.common import exceptions
+from octavia.amphorae.driver_exceptions import exceptions
 
 LOG = log.getLogger(__name__)
 
@@ -42,52 +39,12 @@ CONF = cfg.CONF
 #  to instance" will be logged as usual.
 def retryMaskFilter(record):
     if record.exc_info is not None and isinstance(
-            record.exc_info[1], (
-                drv_exceptions.AmpConnectionRetry,
-                exceptions.ComputeWaitTimeoutException)):
+            record.exc_info[1], exceptions.AmpConnectionRetry):
         return False
     return True
 
 
 LOG.logger.addFilter(retryMaskFilter)
-
-
-def _details_filter(obj):
-    if isinstance(obj, dict):
-        ret = {}
-        for key in obj:
-            if (key in ('certificate', 'private_key', 'passphrase') and
-                    isinstance(obj[key], str)):
-                ret[key] = '***'
-            elif key == 'intermediates' and isinstance(obj[key], list):
-                ret[key] = ['***'] * len(obj[key])
-            else:
-                ret[key] = _details_filter(obj[key])
-        return ret
-    if isinstance(obj, list):
-        return [_details_filter(e) for e in obj]
-    return obj
-
-
-class FilteredJob(Job):
-    def __str__(self):
-        # Override the detault __str__ method from taskflow.job.base.Job,
-        # filter out private information from details
-        cls_name = type(self).__name__
-        details = _details_filter(self.details)
-        return "%s: %s (priority=%s, uuid=%s, details=%s)" % (
-            cls_name, self.name, self.priority,
-            self.uuid, details)
-
-
-class JobDetailsFilter(log.logging.Filter):
-    def filter(self, record):
-        # If the first arg is a Job, convert it now to a string with our custom
-        # method
-        if isinstance(record.args[0], Job):
-            arg0 = record.args[0]
-            record.args = (FilteredJob.__str__(arg0),) + record.args[1:]
-        return True
 
 
 class BaseTaskFlowEngine(object):
@@ -168,11 +125,6 @@ class TaskFlowServiceController(object):
     def __init__(self, driver):
         self.driver = driver
 
-        # Install filter for taskflow executor logger
-        taskflow_logger = log.logging.getLogger(
-            "taskflow.conductors.backends.impl_executor")
-        taskflow_logger.addFilter(JobDetailsFilter())
-
     def run_poster(self, flow_factory, *args, **kwargs):
         with self.driver.persistence_driver.get_persistence() as persistence:
             with self.driver.job_board(persistence) as job_board:
@@ -198,9 +150,17 @@ class TaskFlowServiceController(object):
 
     def _wait_for_job(self, job_board):
         # Wait for job to its complete state
-        for job in job_board.iterjobs():
-            LOG.debug("Waiting for job %s to finish", job.name)
-            job.wait()
+        expiration_time = CONF.task_flow.jobboard_expiration_time
+
+        need_wait = True
+        while need_wait:
+            need_wait = False
+            for job in job_board.iterjobs():
+                # If job hasn't finished in expiration_time/2 seconds,
+                # extend its TTL
+                if not job.wait(timeout=expiration_time / 2):
+                    job.extend_expiry(expiration_time)
+                    need_wait = True
 
     def run_conductor(self, name):
         with self.driver.persistence_driver.get_persistence() as persistence:
@@ -224,35 +184,4 @@ class TaskFlowServiceController(object):
                         name, board, persistence=persistence,
                         engine=CONF.task_flow.engine)
 
-                waiter_th = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=1)
-                waiter_th.submit(self._waiter, conductor)
-
                 conductor.run()
-
-    def _extend_jobs(self, conductor, expiration_time):
-        conductor_name = conductor._name
-
-        with self.driver.persistence_driver.get_persistence() as persistence:
-            with self.driver.job_board(persistence) as board:
-                for job in board.iterjobs():
-                    try:
-                        owner = board.find_owner(job)
-                    except TypeError:
-                        # taskflow throws an exception if a job is not owned
-                        # (probably a bug in taskflow)
-                        continue
-                    # Only extend expiry for jobs that are owner by our
-                    # conductor (from the same process)
-                    if owner == conductor_name:
-                        if job.expires_in() < expiration_time / 2:
-                            LOG.debug("Extend expiry for job %s", job.name)
-                            job.extend_expiry(expiration_time)
-
-    def _waiter(self, conductor):
-        expiration_time = CONF.task_flow.jobboard_expiration_time
-
-        while True:
-            self._extend_jobs(conductor, expiration_time)
-
-            time.sleep(expiration_time / 4)

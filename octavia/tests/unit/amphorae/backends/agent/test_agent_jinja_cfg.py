@@ -87,7 +87,9 @@ class AgentJinjaTestCase(base.TestCase):
                            'agent_request_read_timeout = 180\n'
                            'amphora_id = ' + AMP_ID + '\n'
                            'amphora_udp_driver = keepalived_lvs\n'
-                           'agent_tls_protocol = TLSv1.2\n\n'
+                           'agent_tls_protocol = TLSv1.2\n'
+                           'dhcp_ip = None\n'
+                           'snat_ip = None\n\n'
                            '[controller_worker]\n'
                            'loadbalancer_topology = ' +
                            constants.TOPOLOGY_SINGLE)
@@ -129,7 +131,9 @@ class AgentJinjaTestCase(base.TestCase):
                            'agent_request_read_timeout = 180\n'
                            'amphora_id = ' + AMP_ID + '\n'
                            'amphora_udp_driver = keepalived_lvs\n'
-                           'agent_tls_protocol = TLSv1.2\n\n'
+                           'agent_tls_protocol = TLSv1.2\n'
+                           'dhcp_ip = None\n'
+                           'snat_ip = None\n\n'
                            '[controller_worker]\n'
                            'loadbalancer_topology = ' +
                            constants.TOPOLOGY_ACTIVE_STANDBY)
@@ -173,7 +177,9 @@ class AgentJinjaTestCase(base.TestCase):
                            'agent_request_read_timeout = 180\n'
                            'amphora_id = ' + AMP_ID + '\n'
                            'amphora_udp_driver = new_udp_driver\n'
-                           'agent_tls_protocol = TLSv1.2\n\n'
+                           'agent_tls_protocol = TLSv1.2\n'
+                           'dhcp_ip = None\n'
+                           'snat_ip = None\n\n'
                            '[controller_worker]\n'
                            'loadbalancer_topology = ' +
                            constants.TOPOLOGY_SINGLE)

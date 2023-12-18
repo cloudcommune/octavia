@@ -91,12 +91,9 @@ class TestComputeTasks(base.TestCase):
     @mock.patch('octavia.amphorae.backends.agent.'
                 'agent_jinja_cfg.AgentJinjaTemplater.'
                 'build_agent_config', return_value='test_conf')
-    @mock.patch('octavia.common.jinja.'
-                'user_data_jinja_cfg.UserDataJinjaCfg.'
-                'build_user_data_config', return_value='user_data_conf')
     @mock.patch('stevedore.driver.DriverManager.driver')
-    def test_compute_create(self, mock_driver, mock_ud_conf,
-                            mock_conf, mock_jinja, mock_log_cfg):
+    def test_compute_create(self, mock_driver, mock_conf, mock_jinja,
+                            mock_log_cfg):
 
         image_owner_id = uuidutils.generate_uuid()
         self.conf.config(
@@ -123,7 +120,7 @@ class TestComputeTasks(base.TestCase):
             config_drive_files={'/etc/octavia/'
                                 'amphora-agent.conf': 'test_conf',
                                 '/etc/rsyslog.d/10-rsyslog.conf': 'FAKE CFG'},
-            user_data='user_data_conf',
+            user_data=None,
             server_group_id=SERVER_GRPOUP_ID,
             availability_zone=None)
 
@@ -158,13 +155,14 @@ class TestComputeTasks(base.TestCase):
                 'build_agent_config', return_value='test_conf')
     @mock.patch('octavia.common.jinja.'
                 'user_data_jinja_cfg.UserDataJinjaCfg.'
-                'build_user_data_config', return_value='user_data_conf')
+                'build_user_data_config', return_value='test_conf')
     @mock.patch('stevedore.driver.DriverManager.driver')
     def test_compute_create_user_data(self, mock_driver,
                                       mock_ud_conf, mock_conf, mock_jinja):
 
         self.conf.config(
             group="controller_worker", user_data_config_drive=True)
+        mock_ud_conf.return_value = 'test_ud_conf'
         createcompute = compute_tasks.ComputeCreate()
 
         mock_driver.build.return_value = COMPUTE_ID
@@ -183,7 +181,7 @@ class TestComputeTasks(base.TestCase):
             network_ids=AMP_NET,
             port_ids=[PORT_ID],
             config_drive_files=None,
-            user_data='user_data_conf',
+            user_data='test_ud_conf',
             server_group_id=None,
             availability_zone=None)
 
@@ -218,13 +216,9 @@ class TestComputeTasks(base.TestCase):
     @mock.patch('octavia.amphorae.backends.agent.'
                 'agent_jinja_cfg.AgentJinjaTemplater.'
                 'build_agent_config', return_value='test_conf')
-    @mock.patch('octavia.common.jinja.'
-                'user_data_jinja_cfg.UserDataJinjaCfg.'
-                'build_user_data_config', return_value='user_data_conf')
     @mock.patch('stevedore.driver.DriverManager.driver')
-    def test_compute_create_availability_zone(self, mock_driver, mock_ud_conf,
-                                              mock_conf, mock_jinja,
-                                              mock_log_cfg):
+    def test_compute_create_availability_zone(self, mock_driver, mock_conf,
+                                              mock_jinja, mock_log_cfg):
 
         image_owner_id = uuidutils.generate_uuid()
         compute_zone = uuidutils.generate_uuid()
@@ -255,7 +249,7 @@ class TestComputeTasks(base.TestCase):
             config_drive_files={'/etc/octavia/'
                                 'amphora-agent.conf': 'test_conf',
                                 '/etc/rsyslog.d/10-rsyslog.conf': 'FAKE CFG'},
-            user_data='user_data_conf',
+            user_data=None,
             server_group_id=SERVER_GRPOUP_ID,
             availability_zone=compute_zone)
 
@@ -290,13 +284,9 @@ class TestComputeTasks(base.TestCase):
     @mock.patch('octavia.amphorae.backends.agent.'
                 'agent_jinja_cfg.AgentJinjaTemplater.'
                 'build_agent_config', return_value='test_conf')
-    @mock.patch('octavia.common.jinja.'
-                'user_data_jinja_cfg.UserDataJinjaCfg.'
-                'build_user_data_config', return_value='user_data_conf')
     @mock.patch('stevedore.driver.DriverManager.driver')
     def test_compute_create_without_ssh_access(
-            self, mock_driver, mock_user_data_config,
-            mock_conf, mock_jinja, mock_log_cfg):
+            self, mock_driver, mock_conf, mock_jinja, mock_log_cfg):
 
         createcompute = compute_tasks.ComputeCreate()
 
@@ -322,7 +312,7 @@ class TestComputeTasks(base.TestCase):
             config_drive_files={'/etc/octavia/'
                                 'amphora-agent.conf': 'test_conf',
                                 '/etc/rsyslog.d/10-rsyslog.conf': 'FAKE CFG'},
-            user_data='user_data_conf',
+            user_data=None,
             server_group_id=SERVER_GRPOUP_ID,
             availability_zone=None)
 
@@ -356,12 +346,9 @@ class TestComputeTasks(base.TestCase):
     @mock.patch('octavia.amphorae.backends.agent.'
                 'agent_jinja_cfg.AgentJinjaTemplater.'
                 'build_agent_config', return_value='test_conf')
-    @mock.patch('octavia.common.jinja.'
-                'user_data_jinja_cfg.UserDataJinjaCfg.'
-                'build_user_data_config', return_value='user_data_conf')
     @mock.patch('stevedore.driver.DriverManager.driver')
-    def test_compute_create_cert(self, mock_driver, mock_ud_conf,
-                                 mock_conf, mock_jinja, mock_log_cfg):
+    def test_compute_create_cert(self, mock_driver, mock_conf, mock_jinja,
+                                 mock_log_cfg):
         createcompute = compute_tasks.CertComputeCreate()
         key = utils.get_compatible_server_certs_key_passphrase()
         fer = fernet.Fernet(key)
@@ -388,11 +375,10 @@ class TestComputeTasks(base.TestCase):
             sec_groups=AMP_SEC_GROUPS,
             network_ids=AMP_NET,
             port_ids=[],
-            user_data='user_data_conf',
+            user_data=None,
             config_drive_files={
                 '/etc/rsyslog.d/10-rsyslog.conf': 'FAKE CFG',
-                '/etc/octavia/certs/server.pem': fer.decrypt(
-                    test_cert).decode('utf-8'),
+                '/etc/octavia/certs/server.pem': fer.decrypt(test_cert),
                 '/etc/octavia/certs/client_ca.pem': 'test',
                 '/etc/octavia/amphora-agent.conf': 'test_conf'},
             server_group_id=SERVER_GRPOUP_ID,

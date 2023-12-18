@@ -244,6 +244,9 @@ backend {{ pool.id }}
     {% else %}
     mode {{ pool.protocol }}
     {% endif %}
+    {% if pool.protocol.lower() == constants.PROTOCOL_TCP.lower() %}
+    option tcpka
+    {% endif %}
     {% if pool.get(constants.HTTP_REUSE, False) and (
           pool.protocol.lower() == constants.PROTOCOL_HTTP.lower() or
           (pool.protocol.lower() == constants.PROTOCOL_PROXY.lower() and
@@ -307,16 +310,16 @@ backend {{ pool.id }}
     {% endif %}
     {% if pool.protocol.lower() == constants.PROTOCOL_HTTP.lower() %}
         {% if listener.insert_headers.get('X-Forwarded-For',
-                                          'False').lower() == 'true' %}
+                                          'True').lower() == 'true' %}
     option forwardfor
         {% endif %}
         {% if listener.insert_headers.get('X-Forwarded-Port',
-                                          'False').lower() == 'true' %}
+                                          'True').lower() == 'true' %}
     http-request set-header X-Forwarded-Port %[dst_port]
         {% endif %}
     {% endif %}
     {% if listener.insert_headers.get('X-Forwarded-Proto',
-                                          'False').lower() == 'true' %}
+                                          'True').lower() == 'true' %}
         {% if listener.protocol.lower() == constants.PROTOCOL_HTTP.lower() %}
     http-request set-header X-Forwarded-Proto http
         {% elif listener.protocol.lower() ==

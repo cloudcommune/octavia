@@ -226,7 +226,9 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
 
         # Currently we are using the VIP network for VRRP
         # so we need to open up the protocols for it
-        if load_balancer.topology == constants.TOPOLOGY_ACTIVE_STANDBY:
+        # multi active
+        if load_balancer.topology in (constants.TOPOLOGY_ACTIVE_STANDBY,
+                                      constants.TOPOLOGY_MULTI_ACTIVE):
             try:
                 self._create_security_group_rule(
                     sec_grp_id,
@@ -589,10 +591,11 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
                 load_balancer.amphorae):
             self.unplug_aap_port(vip, amphora, subnet)
 
-    def plug_network(self, compute_id, network_id):
+    def plug_network(self, compute_id, network_id, ip_address=None):
         try:
             interface = self.compute.attach_network_or_port(
-                compute_id=compute_id, network_id=network_id)
+                compute_id=compute_id, network_id=network_id,
+                ip_address=ip_address)
         except exceptions.NotFound as e:
             if 'Instance' in str(e):
                 raise base.AmphoraNotFound(str(e))
@@ -609,14 +612,15 @@ class AllowedAddressPairsDriver(neutron_base.BaseNeutronDriver):
 
         return self._nova_interface_to_octavia_interface(compute_id, interface)
 
-    def unplug_network(self, compute_id, network_id):
+    def unplug_network(self, compute_id, network_id, ip_address=None):
         interfaces = self.get_plugged_networks(compute_id)
         if not interfaces:
             msg = ('Amphora with compute id {compute_id} does not have any '
                    'plugged networks').format(compute_id=compute_id)
             raise base.NetworkNotFound(msg)
 
-        unpluggers = self._get_interfaces_to_unplug(interfaces, network_id)
+        unpluggers = self._get_interfaces_to_unplug(interfaces, network_id,
+                                                    ip_address=ip_address)
         removed_port_ids = set()
         for index, unplugger in enumerate(unpluggers):
             self.compute.detach_port(

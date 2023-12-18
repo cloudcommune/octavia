@@ -39,13 +39,13 @@ class AmphoraInfo(object):
         body = {'hostname': socket.gethostname(),
                 'haproxy_version':
                     self._get_version_of_installed_package('haproxy'),
-                'api_version': api_server.VERSION}
+                'api_version': api_server.VERSION,
+                'enable_prometheus': True}
         if extend_body:
             body.update(extend_body)
         return webob.Response(json=body)
 
     def compile_amphora_details(self, extend_lvs_driver=None):
-        haproxy_loadbalancer_list = sorted(util.get_loadbalancers())
         haproxy_listener_list = sorted(util.get_listeners())
         extend_body = {}
         lvs_listener_list = []
@@ -68,7 +68,7 @@ class AmphoraInfo(object):
                 'networks': self._get_networks(),
                 'active': True,
                 'haproxy_count':
-                    self._count_haproxy_processes(haproxy_loadbalancer_list),
+                    self._count_haproxy_processes(haproxy_listener_list),
                 'cpu': {
                     'total': cpu['total'],
                     'user': cpu['user'],
@@ -113,7 +113,7 @@ class AmphoraInfo(object):
     def _count_lvs_listener_processes(self, lvs_driver, listener_list):
         num = 0
         for listener_id in listener_list:
-            if util.is_lvs_listener_running(listener_id):
+            if lvs_driver.is_listener_running(listener_id):
                 # optional check if it's still running
                 num += 1
         return num
@@ -150,7 +150,7 @@ class AmphoraInfo(object):
                 'iowait': vals[6],
                 'irq': vals[7],
                 'softirq': vals[8],
-                'total': sum(int(i) for i in vals[2:])
+                'total': sum([int(i) for i in vals[2:]])
             }
 
     def _load(self):
@@ -165,10 +165,10 @@ class AmphoraInfo(object):
             for interface in netns.get_links():
                 interface_name = None
                 for item in interface['attrs']:
-                    if (item[0] == consts.IFLA_IFNAME and
+                    if (item[0] == 'IFLA_IFNAME' and
                             not item[1].startswith('eth')):
                         break
-                    if item[0] == consts.IFLA_IFNAME:
+                    if item[0] == 'IFLA_IFNAME':
                         interface_name = item[1]
                     if item[0] == 'IFLA_STATS64':
                         networks[interface_name] = dict(

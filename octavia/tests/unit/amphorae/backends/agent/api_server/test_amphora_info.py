@@ -38,7 +38,6 @@ class TestAmphoraInfo(base.TestCase):
     FAKE_LISTENER_ID_3 = uuidutils.generate_uuid()
     FAKE_LISTENER_ID_4 = uuidutils.generate_uuid()
     LB_ID_1 = uuidutils.generate_uuid()
-    LB_ID_2 = uuidutils.generate_uuid()
 
     def setUp(self):
         super().setUp()
@@ -113,8 +112,6 @@ class TestAmphoraInfo(base.TestCase):
     @mock.patch('octavia.amphorae.backends.agent.api_server.util.'
                 'get_listeners', return_value=[FAKE_LISTENER_ID_1,
                                                FAKE_LISTENER_ID_2])
-    @mock.patch('octavia.amphorae.backends.agent.api_server.util.'
-                'get_loadbalancers', return_value=[LB_ID_1, LB_ID_2])
     @mock.patch('octavia.amphorae.backends.agent.api_server.'
                 'amphora_info.AmphoraInfo._get_meminfo')
     @mock.patch('octavia.amphorae.backends.agent.api_server.'
@@ -131,8 +128,7 @@ class TestAmphoraInfo(base.TestCase):
     @mock.patch('socket.gethostname', return_value='FAKE_HOST')
     def test_compile_amphora_details(self, mhostname, m_count, m_pkg_version,
                                      m_load, m_get_nets, m_os, m_cpu,
-                                     mget_mem, mget_loadbalancers,
-                                     mget_listeners):
+                                     mget_mem, mget_listener):
         mget_mem.return_value = {'SwapCached': 0, 'Buffers': 344792,
                                  'MemTotal': 21692784, 'Cached': 4271856,
                                  'Slab': 534384, 'MemFree': 12685624,
@@ -184,11 +180,8 @@ class TestAmphoraInfo(base.TestCase):
                          u'topology_status': u'OK'}
         actual = self.amp_info.compile_amphora_details()
         self.assertEqual(expected_dict, actual.json)
-        m_count.assert_called_once_with(sorted(mget_loadbalancers()))
         api_server.VERSION = original_version
 
-    @mock.patch('octavia.amphorae.backends.agent.api_server.util.'
-                'is_lvs_listener_running')
     @mock.patch('octavia.amphorae.backends.agent.api_server.util.'
                 'get_lvs_listeners',
                 return_value=[FAKE_LISTENER_ID_3, FAKE_LISTENER_ID_4])
@@ -212,8 +205,7 @@ class TestAmphoraInfo(base.TestCase):
                                               m_pkg_version, m_load,
                                               m_get_nets,
                                               m_os, m_cpu, mget_mem,
-                                              mock_get_lb, mget_lvs_listener,
-                                              mock_is_lvs_listener_running):
+                                              mock_get_lb, mget_lvs_listener):
         mget_mem.return_value = {'SwapCached': 0, 'Buffers': 344792,
                                  'MemTotal': 21692784, 'Cached': 4271856,
                                  'Slab': 534384, 'MemFree': 12685624,
@@ -235,7 +227,7 @@ class TestAmphoraInfo(base.TestCase):
         m_count.return_value = 5
         self.lvs_driver.get_subscribed_amp_compile_info.return_value = [
             'keepalived', 'ipvsadm']
-        mock_is_lvs_listener_running.side_effect = [True, False]
+        self.lvs_driver.is_listener_running.side_effect = [True, False]
         mock_get_lb.return_value = [self.LB_ID_1]
         original_version = api_server.VERSION
         api_server.VERSION = self.API_VERSION
@@ -290,10 +282,8 @@ class TestAmphoraInfo(base.TestCase):
             [uuidutils.generate_uuid(), uuidutils.generate_uuid()])
         self.assertEqual(1, result)
 
-    @mock.patch('octavia.amphorae.backends.agent.api_server.util.'
-                'is_lvs_listener_running')
-    def test__count_lvs_listener_processes(self, mock_is_lvs_listener_running):
-        mock_is_lvs_listener_running.side_effect = [True, False, True]
+    def test__count_lvs_listener_processes(self):
+        self.lvs_driver.is_listener_running.side_effect = [True, False, True]
         expected = 2
         actual = self.amp_info._count_lvs_listener_processes(
             self.lvs_driver, [self.FAKE_LISTENER_ID_1,

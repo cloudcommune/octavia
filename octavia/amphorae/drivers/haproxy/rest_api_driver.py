@@ -17,7 +17,6 @@ import hashlib
 import os
 import ssl
 import time
-from typing import Optional
 import warnings
 
 from oslo_context import context as oslo_context
@@ -33,15 +32,14 @@ from octavia.amphorae.drivers.haproxy import exceptions as exc
 from octavia.amphorae.drivers.keepalived import vrrp_rest_driver
 from octavia.common.config import cfg
 from octavia.common import constants as consts
+from octavia.common import exceptions
 import octavia.common.jinja.haproxy.combined_listeners.jinja_cfg as jinja_combo
 import octavia.common.jinja.haproxy.split_listeners.jinja_cfg as jinja_split
 from octavia.common.jinja.lvs import jinja_cfg as jinja_udp_cfg
 from octavia.common.tls_utils import cert_parser
 from octavia.common import utils
 from octavia.db import api as db_apis
-from octavia.db import models as db_models
 from octavia.db import repositories as repo
-from octavia.network import data_models as network_models
 
 
 LOG = logging.getLogger(__name__)
@@ -96,6 +94,18 @@ class HaproxyAmphoraLoadBalancerDriver(
 
         return haproxy_version_string.split('.')[:2]
 
+    def _get_prometheus_compatibility(self, amphora, timeout_dict=None):
+        """ Get prometheus compatibility for amphora api
+        :return: True or False
+        """
+        self._populate_amphora_api_version(
+            amphora, timeout_dict=timeout_dict)
+        amp_info = self.clients[amphora.api_version].get_info(
+            amphora, timeout_dict=timeout_dict)
+        enable_prometheus = amp_info.get('enable_prometheus', False)
+
+        return enable_prometheus
+
     def _populate_amphora_api_version(self, amphora, timeout_dict=None,
                                       raise_retry_exception=False):
         """Populate the amphora object with the api_version
@@ -116,11 +126,6 @@ class HaproxyAmphoraLoadBalancerDriver(
         LOG.debug('Amphora %s has API version %s',
                   amphora.id, amphora.api_version)
         return list(map(int, amphora.api_version.split('.')))
-
-    def check(self, amphora: db_models.Amphora,
-              timeout_dict: Optional[dict] = None):
-        """Check connectivity to the amphora."""
-        self._populate_amphora_api_version(amphora, timeout_dict)
 
     def update_amphora_listeners(self, loadbalancer, amphora,
                                  timeout_dict=None):
@@ -150,6 +155,7 @@ class HaproxyAmphoraLoadBalancerDriver(
             amphora, timeout_dict=timeout_dict)
         # Check which config style to use
         api_version = self._populate_amphora_api_version(amphora)
+        enable_prometheus = self._get_prometheus_compatibility(amphora, timeout_dict=timeout_dict)
         if api_version[0] == 0 and api_version[1] <= 5:  # 0.5 or earlier
             split_config = True
             LOG.warning(
@@ -229,7 +235,8 @@ class HaproxyAmphoraLoadBalancerDriver(
                 config = self.jinja_combo.build_config(
                     host_amphora=amphora, listeners=listeners_to_update,
                     tls_certs=certs,
-                    haproxy_versions=haproxy_versions)
+                    haproxy_versions=haproxy_versions,
+                    enable_prometheus=enable_prometheus)
                 self.clients[amphora.api_version].upload_config(
                     amphora, loadbalancer.id, config,
                     timeout_dict=timeout_dict)
@@ -352,21 +359,25 @@ class HaproxyAmphoraLoadBalancerDriver(
         if listener in listener.load_balancer.listeners:
             listener.load_balancer.listeners.remove(listener)
 
-        # Check if there's any certs that we need to delete
-        certs = self._process_tls_certificates(listener)
-        certs_to_delete = set()
-        if certs['tls_cert']:
-            certs_to_delete.add(certs['tls_cert'].id)
-        for sni_cert in certs['sni_certs']:
-            certs_to_delete.add(sni_cert.id)
+        try:
+            # Check if there's any certs that we need to delete
+            certs = self._process_tls_certificates(listener)
+        except exceptions.CertificateRetrievalException:
+            LOG.warning("failed to retrieve certs, skip to delete certs")
+        else:
+            certs_to_delete = set()
+            if certs['tls_cert']:
+                certs_to_delete.add(certs['tls_cert'].id)
+            for sni_cert in certs['sni_certs']:
+                certs_to_delete.add(sni_cert.id)
 
-        # Delete them (they'll be recreated before the reload if they are
-        # needed for other listeners anyway)
-        self._populate_amphora_api_version(amphora)
-        for cert_id in certs_to_delete:
-            self.clients[amphora.api_version].delete_cert_pem(
-                amphora, listener.load_balancer.id,
-                '{id}.pem'.format(id=cert_id))
+            # Delete them (they'll be recreated before the reload if they are
+            # needed for other listeners anyway)
+            self._populate_amphora_api_version(amphora)
+            for cert_id in certs_to_delete:
+                self.clients[amphora.api_version].delete_cert_pem(
+                    amphora, listener.load_balancer.id,
+                    '{id}.pem'.format(id=cert_id))
 
         # See how many non-UDP/SCTP listeners we have left
         non_lvs_listener_count = len([
@@ -398,33 +409,69 @@ class HaproxyAmphoraLoadBalancerDriver(
     def finalize_amphora(self, amphora):
         pass
 
-    def _build_net_info(self, port, amphora, subnet, mtu=None):
-        # NOTE(blogan): using the vrrp port here because that
-        # is what the allowed address pairs network driver sets
-        # this particular port to.  This does expose a bit of
-        # tight coupling between the network driver and amphora
-        # driver.  We will need to revisit this to try and remove
-        # this tight coupling.
-        # NOTE (johnsom): I am loading the vrrp_ip into the
-        # net_info structure here so that I don't break
-        # compatibility with old amphora agent versions.
-        host_routes = [{'nexthop': hr[consts.NEXTHOP],
-                        'destination': hr[consts.DESTINATION]}
-                       for hr in subnet[consts.HOST_ROUTES]]
-        net_info = {'subnet_cidr': subnet[consts.CIDR],
-                    'gateway': subnet[consts.GATEWAY_IP],
-                    'mac_address': port[consts.MAC_ADDRESS],
-                    'vrrp_ip': amphora[consts.VRRP_IP],
-                    'mtu': mtu or port[consts.NETWORK][consts.MTU],
-                    'host_routes': host_routes}
-        return net_info
+    # multi active
+    def post_loop_vip_plug(self, amphora, load_balancer,
+                           amphorae_network_config, vrrp_port=None,
+                           vip_subnet=None):
+        LOG.info('enter post_loop_vip_plug amphora.id=%s', amphora.id)
+        if amphora.status != consts.DELETED:
+            self._populate_amphora_api_version(amphora)
+            if vip_subnet is None:
+                subnet = amphorae_network_config.get(amphora.id).vip_subnet
+            else:
+                subnet = vip_subnet
+            # NOTE(blogan): using the vrrp port here because that
+            # is what the allowed address pairs network driver sets
+            # this particular port to.  This does expose a bit of
+            # tight coupling between the network driver and amphora
+            # driver.  We will need to revisit this to try and remove
+            # this tight coupling.
+            # NOTE (johnsom): I am loading the vrrp_ip into the
+            # net_info structure here so that I don't break
+            # compatibility with old amphora agent versions.
+            if vrrp_port is None:
+                port = amphorae_network_config.get(amphora.id).vrrp_port
+                mtu = port.network.mtu
+            else:
+                port = vrrp_port
+                mtu = port.network['mtu']
+            LOG.debug("Post-Loop-VIP-Plugging with vrrp_ip %s vrrp_port %s",
+                      amphora.vrrp_ip, port.id)
+            host_routes = [{'nexthop': hr.nexthop,
+                            'destination': hr.destination}
+                           for hr in subnet.host_routes]
+            net_info = {'subnet_cidr': subnet.cidr,
+                        'gateway': subnet.gateway_ip,
+                        'mac_address': port.mac_address,
+                        'vrrp_ip': amphora.vrrp_ip,
+                        'mtu': mtu,
+                        'host_routes': host_routes}
+            try:
+                #import rpdb;rpdb.set_trace()
+                self.clients[amphora.api_version].plug_vip_to_loop(
+                    amphora, load_balancer.vip.ip_address, net_info)
+            except exc.Conflict:
+                LOG.warning('VIP with MAC %(mac)s already exists on amphora, '
+                            'skipping post_vip_plug',
+                            {'mac': port.mac_address})
 
     def post_vip_plug(self, amphora, load_balancer, amphorae_network_config,
                       vrrp_port=None, vip_subnet=None):
         if amphora.status != consts.DELETED:
             self._populate_amphora_api_version(amphora)
             if vip_subnet is None:
-                vip_subnet = amphorae_network_config.get(amphora.id).vip_subnet
+                subnet = amphorae_network_config.get(amphora.id).vip_subnet
+            else:
+                subnet = vip_subnet
+            # NOTE(blogan): using the vrrp port here because that
+            # is what the allowed address pairs network driver sets
+            # this particular port to.  This does expose a bit of
+            # tight coupling between the network driver and amphora
+            # driver.  We will need to revisit this to try and remove
+            # this tight coupling.
+            # NOTE (johnsom): I am loading the vrrp_ip into the
+            # net_info structure here so that I don't break
+            # compatibility with old amphora agent versions.
             if vrrp_port is None:
                 port = amphorae_network_config.get(amphora.id).vrrp_port
                 mtu = port.network.mtu
@@ -433,9 +480,15 @@ class HaproxyAmphoraLoadBalancerDriver(
                 mtu = port.network['mtu']
             LOG.debug("Post-VIP-Plugging with vrrp_ip %s vrrp_port %s",
                       amphora.vrrp_ip, port.id)
-            net_info = self._build_net_info(
-                port.to_dict(recurse=True), amphora.to_dict(),
-                vip_subnet.to_dict(recurse=True), mtu)
+            host_routes = [{'nexthop': hr.nexthop,
+                            'destination': hr.destination}
+                           for hr in subnet.host_routes]
+            net_info = {'subnet_cidr': subnet.cidr,
+                        'gateway': subnet.gateway_ip,
+                        'mac_address': port.mac_address,
+                        'vrrp_ip': amphora.vrrp_ip,
+                        'mtu': mtu,
+                        'host_routes': host_routes}
             try:
                 self.clients[amphora.api_version].plug_vip(
                     amphora, load_balancer.vip.ip_address, net_info)
@@ -444,7 +497,7 @@ class HaproxyAmphoraLoadBalancerDriver(
                             'skipping post_vip_plug',
                             {'mac': port.mac_address})
 
-    def post_network_plug(self, amphora, port, amphora_network_config):
+    def post_network_plug(self, amphora, port):
         fixed_ips = []
         for fixed_ip in port.fixed_ips:
             host_routes = [{'nexthop': hr.nexthop,
@@ -452,25 +505,11 @@ class HaproxyAmphoraLoadBalancerDriver(
                            for hr in fixed_ip.subnet.host_routes]
             ip = {'ip_address': fixed_ip.ip_address,
                   'subnet_cidr': fixed_ip.subnet.cidr,
-                  'host_routes': host_routes,
-                  'gateway': fixed_ip.subnet.gateway_ip}
+                  'host_routes': host_routes}
             fixed_ips.append(ip)
         port_info = {'mac_address': port.mac_address,
                      'fixed_ips': fixed_ips,
                      'mtu': port.network.mtu}
-        if port.id == amphora.vrrp_port_id:
-            if isinstance(amphora_network_config,
-                          network_models.AmphoraNetworkConfig):
-                amphora_network_config = amphora_network_config.to_dict(
-                    recurse=True)
-            # We have to special-case sharing the vrrp port and pass through
-            # enough extra information to populate the whole VIP port
-            net_info = self._build_net_info(
-                port.to_dict(recurse=True), amphora.to_dict(),
-                amphora_network_config[consts.VIP_SUBNET],
-                port.network.mtu)
-            net_info['vip'] = amphora.ha_ip
-            port_info['vip_net_info'] = net_info
         try:
             self._populate_amphora_api_version(amphora)
             self.clients[amphora.api_version].plug_network(amphora, port_info)
@@ -598,6 +637,9 @@ class HaproxyAmphoraLoadBalancerDriver(
             if self.clients[amp.api_version].get_cert_md5sum(
                     amp, listener_id, name, ignore=(404,)) == md5sum:
                 return
+            else:
+                self.clients[amp.api_version].delete_cert_pem(
+                    amp, listener_id, name)
         except exc.NotFound:
             pass
 
@@ -642,15 +684,15 @@ class HaproxyAmphoraLoadBalancerDriver(
                              req_read_timeout, conn_max_retries,
                              conn_retry_interval
         :type timeout_dict: dict
-        :returns: the interface name string if found.
-        :raises octavia.amphorae.drivers.haproxy.exceptions.NotFound:
-                No interface found on the amphora
-        :raises TimeOutException: The amphora didn't reply
+        :returns: None if not found, the interface name string if found.
         """
-        self._populate_amphora_api_version(amphora, timeout_dict)
-        response_json = self.clients[amphora.api_version].get_interface(
-            amphora, ip_address, timeout_dict, log_error=False)
-        return response_json.get('interface', None)
+        try:
+            self._populate_amphora_api_version(amphora, timeout_dict)
+            response_json = self.clients[amphora.api_version].get_interface(
+                amphora, ip_address, timeout_dict, log_error=False)
+            return response_json.get('interface', None)
+        except (exc.NotFound, driver_except.TimeOutException):
+            return None
 
 
 # Check a custom hostname
@@ -871,6 +913,14 @@ class AmphoraAPIClient0_5(AmphoraAPIClientBase):
                       json=port)
         return exc.check_exception(r)
 
+    # multi active
+    def plug_vip_to_loop(self, amp, vip, net_info):
+        LOG.info('enter plug_vip_to_loop == post data to amp')
+        r = self.post(amp,
+                      'plug/vip/loop/{vip}'.format(vip=vip),
+                      json=net_info)
+        return exc.check_exception(r)
+
     def plug_vip(self, amp, vip, net_info):
         r = self.post(amp,
                       'plug/vip/{vip}'.format(vip=vip),
@@ -1000,6 +1050,14 @@ class AmphoraAPIClient1_0(AmphoraAPIClientBase):
     def plug_network(self, amp, port):
         r = self.post(amp, 'plug/network',
                       json=port)
+        return exc.check_exception(r)
+
+    # multi active
+    def plug_vip_to_loop(self, amp, vip, net_info):
+        LOG.info('enter plug_vip_to_loop == post data to amp')
+        r = self.post(amp,
+                      'plug/vip/loop/{vip}'.format(vip=vip),
+                      json=net_info)
         return exc.check_exception(r)
 
     def plug_vip(self, amp, vip, net_info):

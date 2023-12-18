@@ -33,11 +33,8 @@ class SessionPersistencePOST(types.BaseType):
     """Defines mandatory and optional attributes of a POST request."""
     type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_SP_TYPES),
                          mandatory=True)
-    # pattern of invalid characters is based on
-    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
-    cookie_name = wtypes.wsattr(wtypes.StringType(
-        max_length=255, pattern=r'^[^\s,;\\]+$'),
-        default=None)
+    cookie_name = wtypes.wsattr(wtypes.StringType(max_length=255),
+                                default=None)
     persistence_timeout = wtypes.wsattr(wtypes.IntegerType(), default=None)
     persistence_granularity = wtypes.wsattr(types.IPAddressType(),
                                             default=None)
@@ -46,11 +43,8 @@ class SessionPersistencePOST(types.BaseType):
 class SessionPersistencePUT(types.BaseType):
     """Defines attributes that are acceptable of a PUT request."""
     type = wtypes.wsattr(wtypes.Enum(str, *constants.SUPPORTED_SP_TYPES))
-    # pattern of invalid characters is based on
-    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
-    cookie_name = wtypes.wsattr(wtypes.StringType(
-        max_length=255, pattern=r'^[^\s,;\\]+$'),
-        default=None)
+    cookie_name = wtypes.wsattr(wtypes.StringType(max_length=255),
+                                default=None)
     persistence_timeout = wtypes.wsattr(wtypes.IntegerType(), default=None)
     persistence_granularity = wtypes.wsattr(types.IPAddressType(),
                                             default=None)

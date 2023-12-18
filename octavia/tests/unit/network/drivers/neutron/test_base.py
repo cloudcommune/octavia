@@ -19,6 +19,7 @@ from oslo_config import fixture as oslo_fixture
 
 from octavia.common import clients
 from octavia.common import data_models
+from octavia.common import exceptions as exception
 from octavia.network import base as network_base
 from octavia.network import data_models as network_models
 from octavia.network.drivers.neutron import base as neutron_base
@@ -564,143 +565,162 @@ class TestBaseNeutronNetworkDriver(base.TestCase):
         self.assertEqual(t_constants.MOCK_SUBNET_IP_AVAILABILITY,
                          ip_avail.subnet_ip_availability)
 
-    def test_plug_fixed_ip(self):
-        show_port = self.driver.neutron_client.show_port
-        show_port.return_value = {
+    def test_add_ecmp_routes(self):
+        show_router = self.driver.neutron_client.show_router
+        mock_router = mock.MagicMock()
+        mock_router_info = mock.MagicMock()
+        mock_router.router = mock_router_info
+        mock_routes = []
+        mock_router_info.routes = mock_routes
+        # show_router.side_effect = [None, neutron_client_exceptions.NotFound]
+        show_router.return_value = mock_router.to_dict()
+        update_router = self.driver.neutron_client.update_router
+        update_router.return_value = "success"
+        response = self.driver.add_ecmp_routes('router_id', 'vip',
+                                               ['nexthops1'])
+        self.assertEqual(response, "success")
+
+    def test_del_ecmp_routes(self):
+        show_router = self.driver.neutron_client.show_router
+        mock_router = mock.MagicMock()
+        mock_router_info = mock.MagicMock()
+        mock_router.router = mock_router_info
+        mock_routes = []
+        mock_router_info.routes = mock_routes
+        # show_router.side_effect = [None, neutron_client_exceptions.NotFound]
+        show_router.return_value = mock_router.to_dict()
+        update_router = self.driver.neutron_client.update_router
+        update_router.return_value = "del_success"
+        response = self.driver.add_ecmp_routes('router_id', 'vip',
+                                               ['nexthops1'])
+        self.assertEqual(response, "del_success")
+
+    def test_get_port_by_net_id_device_owner(self):
+        list_port = self.driver.neutron_client.list_ports
+        list_port.return_value = {'ports': [{'port': {
             'id': t_constants.MOCK_PORT_ID,
-            'fixed_ips': [
-                {
-                    'subnet_id': t_constants.MOCK_SUBNET_ID,
-                    'ip_address': t_constants.MOCK_IP_ADDRESS,
-                    'subnet': None
-                }]
-        }
-
-        self.driver.plug_fixed_ip(t_constants.MOCK_PORT_ID,
-                                  t_constants.MOCK_SUBNET_ID2,
-                                  t_constants.MOCK_IP_ADDRESS2)
-
-        expected_body = {
-            'port': {
-                'fixed_ips': [
-                    {
-                        'subnet_id': t_constants.MOCK_SUBNET_ID,
-                        'ip_address': t_constants.MOCK_IP_ADDRESS,
-                        'subnet': None
-                    }, {
-                        'subnet_id': t_constants.MOCK_SUBNET_ID2,
-                        'ip_address': t_constants.MOCK_IP_ADDRESS2
-                    }
-                ]
-            }
-
-        }
-        self.driver.neutron_client.update_port.assert_called_once_with(
-            t_constants.MOCK_PORT_ID,
-            expected_body)
-
-    def test_plug_fixed_ip_no_ip_address(self):
-        show_port = self.driver.neutron_client.show_port
-        show_port.return_value = {
-            'id': t_constants.MOCK_PORT_ID,
-            'fixed_ips': [
-                {
-                    'subnet_id': t_constants.MOCK_SUBNET_ID,
-                    'ip_address': t_constants.MOCK_IP_ADDRESS,
-                    'subnet': None
-                }]
-        }
-
-        self.driver.plug_fixed_ip(t_constants.MOCK_PORT_ID,
-                                  t_constants.MOCK_SUBNET_ID2)
-
-        expected_body = {
-            'port': {
-                'fixed_ips': [
-                    {
-                        'subnet_id': t_constants.MOCK_SUBNET_ID,
-                        'ip_address': t_constants.MOCK_IP_ADDRESS,
-                        'subnet': None
-                    }, {
-                        'subnet_id': t_constants.MOCK_SUBNET_ID2,
-                    }
-                ]
-            }
-
-        }
-        self.driver.neutron_client.update_port.assert_called_once_with(
-            t_constants.MOCK_PORT_ID,
-            expected_body)
-
-    def test_plug_fixed_ip_exception(self):
-        show_port = self.driver.neutron_client.show_port
-        show_port.return_value = {
-            'id': t_constants.MOCK_PORT_ID,
-            'fixed_ips': [
-                {
-                    'subnet_id': t_constants.MOCK_SUBNET_ID,
-                    'ip_address': t_constants.MOCK_IP_ADDRESS,
-                    'subnet': None
-                }]
-        }
-
-        self.driver.neutron_client.update_port.side_effect = Exception
-
-        self.assertRaises(network_base.NetworkException,
-                          self.driver.plug_fixed_ip,
-                          t_constants.MOCK_PORT_ID,
-                          t_constants.MOCK_SUBNET_ID2)
-
-    def test_unplug_fixed_ip(self):
-        show_port = self.driver.neutron_client.show_port
-        show_port.return_value = {
-            'id': t_constants.MOCK_PORT_ID,
-            'fixed_ips': [
-                {
-                    'subnet_id': t_constants.MOCK_SUBNET_ID,
-                    'ip_address': t_constants.MOCK_IP_ADDRESS,
-                    'subnet': None
-                }, {
-                    'subnet_id': t_constants.MOCK_SUBNET_ID2,
-                    'ip_address': t_constants.MOCK_IP_ADDRESS2,
-                    'subnet': None
-                }]
-        }
-
-        self.driver.unplug_fixed_ip(t_constants.MOCK_PORT_ID,
-                                    t_constants.MOCK_SUBNET_ID)
-
-        expected_body = {
-            'port': {
-                'fixed_ips': [
-                    {
-                        'subnet_id': t_constants.MOCK_SUBNET_ID2,
-                        'ip_address': t_constants.MOCK_IP_ADDRESS2,
-                        'subnet': None
-                    }
-                ]
-            }
-
-        }
-        self.driver.neutron_client.update_port.assert_called_once_with(
-            t_constants.MOCK_PORT_ID,
-            expected_body)
-
-    def test_unplug_fixed_ip_exception(self):
-        show_port = self.driver.neutron_client.show_port
-        show_port.return_value = {
-            'id': t_constants.MOCK_PORT_ID,
-            'fixed_ips': [
-                {
-                    'subnet_id': t_constants.MOCK_SUBNET_ID,
-                    'ip_address': t_constants.MOCK_IP_ADDRESS,
-                    'subnet': None
-                }]
-        }
-
-        self.driver.neutron_client.update_port.side_effect = Exception
-
-        self.assertRaises(network_base.NetworkException,
-                          self.driver.unplug_fixed_ip,
-                          t_constants.MOCK_PORT_ID,
+            'name': t_constants.MOCK_PORT_NAME,
+            'mac_address': t_constants.MOCK_MAC_ADDR,
+            'network_id': t_constants.MOCK_NETWORK_ID,
+            'device_id': t_constants.MOCK_DEVICE_ID,
+            'device_owner': t_constants.MOCK_DEVICE_OWNER,
+            'fixed_ips': [{
+                'subnet_id': t_constants.MOCK_SUBNET_ID,
+                'ip_address': t_constants.MOCK_IP_ADDRESS
+            }]}, }], }
+        port = self.driver.get_port_by_net_id_device_owner(
+            t_constants.MOCK_NETWORK_ID, t_constants.MOCK_DEVICE_OWNER,
+            t_constants.MOCK_SUBNET_ID)
+        self.assertIsInstance(port[0], network_models.Port)
+        self.assertEqual(t_constants.MOCK_PORT_ID, port[0].id)
+        self.assertEqual(t_constants.MOCK_DEVICE_OWNER, port[0].device_owner)
+        self.assertEqual(t_constants.MOCK_PORT_NAME, port[0].name)
+        self.assertEqual(t_constants.MOCK_MAC_ADDR, port[0].mac_address)
+        self.assertEqual(t_constants.MOCK_NETWORK_ID, port[0].network_id)
+        self.assertEqual(1, len(port[0].fixed_ips))
+        self.assertIsInstance(port[0].fixed_ips[0], network_models.FixedIP)
+        self.assertEqual(t_constants.MOCK_SUBNET_ID,
+                         port[0].fixed_ips[0].subnet_id)
+        self.assertEqual(t_constants.MOCK_IP_ADDRESS,
+                         port[0].fixed_ips[0].ip_address)
+        # Negative
+        list_port.side_effect = neutron_client_exceptions.NotFound
+        self.assertRaises(network_base.PortNotFound,
+                          self.driver.get_port_by_net_id_device_owner,
+                          t_constants.MOCK_PORT_NAME,
+                          t_constants.MOCK_DEVICE_OWNER,
                           t_constants.MOCK_SUBNET_ID)
+        list_port.side_effect = Exception
+        self.assertRaises(network_base.NetworkException,
+                          self.driver.get_port_by_net_id_device_owner,
+                          t_constants.MOCK_NETWORK_ID,
+                          t_constants.MOCK_DEVICE_OWNER,
+                          t_constants.MOCK_SUBNET_ID)
+
+    def test_get_router_id(self):
+        list_port = self.driver.neutron_client.list_ports
+        list_port.return_value = {'ports': [{'port': {
+            'id': t_constants.MOCK_PORT_ID,
+            'name': t_constants.MOCK_PORT_NAME,
+            'mac_address': t_constants.MOCK_MAC_ADDR,
+            'network_id': t_constants.MOCK_NETWORK_ID,
+            'device_id': t_constants.MOCK_DEVICE_ID,
+            'device_owner': t_constants.MOCK_DEVICE_OWNER,
+            'fixed_ips': [{
+                'subnet_id': t_constants.MOCK_SUBNET_ID,
+                'ip_address': t_constants.MOCK_IP_ADDRESS
+            }, {
+                'subnet_id': t_constants.MOCK_SUBNET_ID,
+                'ip_address': t_constants.MOCK_IP_ADDRESS
+            }]
+        }, },
+            {'port': {
+                'id': t_constants.MOCK_PORT_ID,
+                'name': t_constants.MOCK_PORT_NAME,
+                'mac_address': t_constants.MOCK_MAC_ADDR,
+                'network_id': t_constants.MOCK_NETWORK_ID,
+                'device_id': t_constants.MOCK_DEVICE_ID,
+                'device_owner': t_constants.MOCK_DEVICE_OWNER,
+                'fixed_ips': [{
+                    'subnet_id': t_constants.MOCK_SUBNET_ID,
+                    'ip_address': t_constants.MOCK_IP_ADDRESS
+                }, {
+                    'subnet_id': t_constants.MOCK_SUBNET_ID,
+                    'ip_address': t_constants.MOCK_IP_ADDRESS
+                }]
+            }, }
+        ], }
+        self.assertRaises(exception.RouterValidationException,
+                          self.driver.get_router_id,
+                          t_constants.MOCK_VIP_NETWORK_ID,
+                          t_constants.MOCK_SUBNET_ID)
+        list_port.return_value = {'ports': [{'port': {
+            'id': t_constants.MOCK_PORT_ID,
+            'name': t_constants.MOCK_PORT_NAME,
+            'mac_address': t_constants.MOCK_MAC_ADDR,
+            'network_id': t_constants.MOCK_NETWORK_ID,
+            'device_id': t_constants.MOCK_DEVICE_ID,
+            'device_owner': t_constants.MOCK_DEVICE_OWNER,
+            'fixed_ips': [{
+                'subnet_id': t_constants.MOCK_SUBNET_ID,
+                'ip_address': t_constants.MOCK_IP_ADDRESS
+            }]}, }], }
+        router_id = self.driver.get_router_id(t_constants.MOCK_VIP_NETWORK_ID,
+                                              t_constants.MOCK_SUBNET_ID)
+        self.assertEqual(router_id, t_constants.MOCK_DEVICE_ID)
+        # Negative
+        list_port.return_value = {'ports': [], }
+        self.assertRaises(exception.RouterValidationException,
+                          self.driver.get_router_id,
+                          t_constants.MOCK_VIP_NETWORK_ID,
+                          t_constants.MOCK_VIP_SUBNET_ID)
+        list_port.side_effect = neutron_client_exceptions.NotFound
+        self.assertRaises(exception.RouterValidationException,
+                          self.driver.get_router_id,
+                          t_constants.MOCK_VIP_NETWORK_ID,
+                          t_constants.MOCK_SUBNET_ID)
+
+    def test_get_port_ip(self):
+        list_port = self.driver.neutron_client.list_ports
+        list_port.return_value = {'ports': [{'port': {
+            'id': t_constants.MOCK_PORT_ID,
+            'name': t_constants.MOCK_PORT_NAME,
+            'mac_address': t_constants.MOCK_MAC_ADDR,
+            'network_id': t_constants.MOCK_NETWORK_ID,
+            'device_id': t_constants.MOCK_DEVICE_ID,
+            'device_owner': t_constants.MOCK_DEVICE_OWNER,
+            'fixed_ips': [{
+                'subnet_id': t_constants.MOCK_SUBNET_ID,
+                'ip_address': t_constants.MOCK_IP_ADDRESS
+            }]}, }], }
+        port_ip1 = self.driver.get_port_ip(t_constants.MOCK_NETWORK_ID,
+                                           t_constants.MOCK_SUBNET_ID,
+                                           t_constants.MOCK_DEVICE_OWNER)
+        self.assertEqual(port_ip1, t_constants.MOCK_IP_ADDRESS)
+        # Negative
+        list_port.side_effect = Exception
+        port_ip2 = self.driver.get_port_ip(
+            t_constants.MOCK_NETWORK_ID,
+            t_constants.MOCK_SUBNET_ID,
+            t_constants.MOCK_DEVICE_OWNER)
+        self.assertEqual(port_ip2, '100.100.100.100')

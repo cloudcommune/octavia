@@ -329,6 +329,18 @@ class ValidationException(APIException):
     code = 400
 
 
+class RouterValidationException(APIException):
+    msg = _('Validation failure: The subnet does not exist Router or more then'
+            ' one Router,Router num is %(number)s')
+    code = 400
+
+
+class PortValidationException(APIException):
+    msg = _('Validation failure: No port found, or greater than one port '
+            'found. Eligible port number is %(number)s.')
+    code = 400
+
+
 class VIPValidationException(APIException):
     msg = _('Validation failure: VIP must contain one of: %(objects)s.')
     code = 400
@@ -413,6 +425,12 @@ class NetworkServiceError(OctaviaException):
 
 class InvalidIPAddress(APIException):
     msg = _('The IP Address %(ip_addr)s is invalid.')
+    code = 400
+
+
+class MultiPortNotFindException(APIException):
+    msg = _('Failed to create multi-active topology. Port required for health '
+            'check was not found.')
     code = 400
 
 

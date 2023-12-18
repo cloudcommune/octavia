@@ -24,6 +24,7 @@ import re
 
 import netaddr
 from oslo_config import cfg
+from oslo_log import log as logging
 import rfc3986
 from wsme import types as wtypes
 
@@ -32,6 +33,8 @@ from octavia.common import exceptions
 from octavia.common import utils
 from octavia.i18n import _
 
+
+LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 
 
@@ -55,7 +58,6 @@ def url_path(url_path):
         p_url = rfc3986.urlparse(rfc3986.normalize_uri(url_path))
 
         invalid_path = (
-            re.search(r"\s", url_path) or
             p_url.scheme or p_url.userinfo or p_url.host or
             p_url.port or
             p_url.path is None or
@@ -341,6 +343,12 @@ def subnet_exists(subnet_id, context=None):
         raise exceptions.InvalidSubresource(
             resource='Subnet', id=subnet_id) from e
     return subnet
+
+
+def get_router_id(vip_network_id, vip_subnet_id):
+    """Check whether the subnet has router."""
+    network_driver = utils.get_network_driver()
+    return network_driver.get_router_id(vip_network_id, vip_subnet_id)
 
 
 def qos_policy_exists(qos_policy_id):

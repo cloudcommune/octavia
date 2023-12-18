@@ -302,12 +302,15 @@ frontend {{ listener.id }}
 {% endmacro %}
 
 
-{% macro backend_macro(constants, lib_consts, listener, pool, loadbalancer, state_file) %}
+{% macro backend_macro(constants, lib_consts, listener, pool, loadbalancer) %}
 backend {{ pool.id }}:{{ listener.id }}
     {% if pool.proxy_protocol is not none %}
     mode {{ listener.protocol_mode }}
     {% else %}
     mode {{ pool.protocol }}
+    {% endif %}
+    {% if pool.protocol.lower() == constants.PROTOCOL_TCP.lower() %}
+    option tcpka
     {% endif %}
     {% if pool.get(constants.HTTP_REUSE, False) and (
           pool.protocol.lower() == constants.PROTOCOL_HTTP.lower() or
@@ -344,9 +347,7 @@ backend {{ pool.id }}:{{ listener.id }}
         {% endif %}
     {% endif %}
     {% if pool.health_monitor and pool.health_monitor.enabled %}
-    {% if state_file %}
     load-server-state-from-file global
-    {% endif %}
     timeout check {{ pool.health_monitor.timeout }}s
         {% if (pool.health_monitor.type ==
                constants.HEALTH_MONITOR_HTTP or pool.health_monitor.type ==
@@ -375,16 +376,16 @@ backend {{ pool.id }}:{{ listener.id }}
     {% endif %}
     {% if pool.protocol.lower() == constants.PROTOCOL_HTTP.lower() %}
         {% if listener.insert_headers.get('X-Forwarded-For',
-                                          'False').lower() == 'true' %}
+                                          'True').lower() == 'true' %}
     option forwardfor
         {% endif %}
         {% if listener.insert_headers.get('X-Forwarded-Port',
-                                          'False').lower() == 'true' %}
+                                          'True').lower() == 'true' %}
     http-request set-header X-Forwarded-Port %[dst_port]
         {% endif %}
     {% endif %}
     {% if listener.insert_headers.get('X-Forwarded-Proto',
-                                          'False').lower() == 'true' %}
+                                          'True').lower() == 'true' %}
         {% if listener.protocol.lower() == constants.PROTOCOL_HTTP.lower() %}
     http-request set-header X-Forwarded-Proto http
         {% elif listener.protocol.lower() ==

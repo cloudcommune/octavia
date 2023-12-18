@@ -589,6 +589,27 @@ class MarkAmphoraBackupInDB(_MarkAmphoraRoleAndPriorityInDB):
         self._revert(result, amphora, *args, **kwargs)
 
 
+class MarkAmphoraMultiInDB(_MarkAmphoraRoleAndPriorityInDB):
+    """Alter the amphora role to: MULTI."""
+
+    def execute(self, amphora):
+        """Mark amphora as MULTI in db.
+
+        :param amphora: Amphora to update role.
+        :returns: None
+        """
+        amp_role = constants.ROLE_MULTI
+        self._execute(amphora, amp_role, None)
+
+    def revert(self, result, amphora, *args, **kwargs):
+        """Removes amphora role association.
+
+        :param amphora: Amphora to update role.
+        :returns: None
+        """
+        self._revert(result, amphora, *args, **kwargs)
+
+
 class MarkAmphoraStandAloneInDB(_MarkAmphoraRoleAndPriorityInDB):
     """Alter the amphora role to: Standalone."""
 
@@ -936,8 +957,6 @@ class MarkLBActiveInDB(BaseDatabaseTask):
                       loadbalancer.id)
             for listener in loadbalancer.listeners:
                 self._mark_listener_status(listener, constants.ACTIVE)
-            for pool in loadbalancer.pools:
-                self._mark_pool_status(pool, constants.ACTIVE)
 
         LOG.info("Mark ACTIVE in DB for load balancer id: %s",
                  loadbalancer.id)
@@ -1012,20 +1031,14 @@ class MarkLBActiveInDB(BaseDatabaseTask):
         """
 
         if self.mark_subobjects:
-            LOG.debug("Marking all listeners and pools of loadbalancer %s"
-                      " ERROR", loadbalancer.id)
+            LOG.debug("Marking all listeners of loadbalancer %s ERROR",
+                      loadbalancer.id)
             for listener in loadbalancer.listeners:
                 try:
                     self._mark_listener_status(listener, constants.ERROR)
                 except Exception:
                     LOG.warning("Error updating listener %s provisioning "
                                 "status", listener.id)
-            for pool in loadbalancer.pools:
-                try:
-                    self._mark_pool_status(pool, constants.ERROR)
-                except Exception:
-                    LOG.warning("Error updating pool %s provisioning "
-                                "status", pool.id)
 
 
 class UpdateLBServerGroupInDB(BaseDatabaseTask):
@@ -1747,38 +1760,6 @@ class MarkHealthMonitorPendingUpdateInDB(BaseDatabaseTask):
         self.task_utils.mark_health_mon_prov_status_error(health_mon.id)
 
 
-class MarkHealthMonitorsOnlineInDB(BaseDatabaseTask):
-    """Mark all enabled health monitors Online
-
-    :param loadbalancer: The Load Balancer that has associated health monitors
-    :returns: None
-    """
-
-    def execute(self, loadbalancer):
-        db_lb = self.loadbalancer_repo.get(
-            db_apis.get_session(),
-            id=loadbalancer.id)
-
-        # Update the healthmonitors of either attached listeners or l7policies
-        hms_to_update = []
-
-        for listener in db_lb.listeners:
-            if listener.default_pool and listener.default_pool.health_monitor:
-                hm = listener.default_pool.health_monitor
-                if hm.enabled:
-                    hms_to_update.append(hm.id)
-            for l7policy in listener.l7policies:
-                if l7policy.redirect_pool and (
-                        l7policy.redirect_pool.health_monitor):
-                    hm = l7policy.redirect_pool.health_monitor
-                    if hm.enabled:
-                        hms_to_update.append(hm.id)
-
-        for hm_id in hms_to_update:
-            self.health_mon_repo.update(db_apis.get_session(), hm_id,
-                                        operating_status=constants.ONLINE)
-
-
 class MarkL7PolicyActiveInDB(BaseDatabaseTask):
     """Mark the l7policy ACTIVE in the DB.
 
@@ -1812,6 +1793,40 @@ class MarkL7PolicyActiveInDB(BaseDatabaseTask):
                     "for l7policy id %s", l7policy.id)
         self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
 
+
+class MarkL7PoliciesActiveInDB(BaseDatabaseTask):
+    """Mark the l7policy ACTIVE in the DB.
+
+    Since sqlalchemy will likely retry by itself always revert if it fails
+    """
+
+    def execute(self, l7policies):
+        """Mark the l7policy ACTIVE in DB.
+
+        :param l7policies: a list of L7Policy object to be updated
+        :returns: None
+        """
+
+        for l7policy in l7policies:
+            LOG.debug("Mark ACTIVE in DB for l7policy id: %s",
+                      l7policy.id)
+
+            op_status = constants.ONLINE if l7policy.enabled else constants.OFFLINE
+            self.l7policy_repo.update(db_apis.get_session(),
+                                      l7policy.id,
+                                      provisioning_status=constants.ACTIVE,
+                                      operating_status=op_status)
+
+    def revert(self, l7policies, *args, **kwargs):
+        """Mark the l7policy as broken
+
+        :param l7policies: a list of L7Policy object that failed to update
+        :returns: None
+        """
+        for l7policy in l7policies:
+            LOG.warning("Reverting mark l7policy ACTIVE in DB "
+                        "for l7policy id %s", l7policy.id)
+            self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
 
 class MarkL7PolicyPendingCreateInDB(BaseDatabaseTask):
     """Mark the l7policy pending create in the DB.
@@ -1905,6 +1920,40 @@ class MarkL7PolicyPendingUpdateInDB(BaseDatabaseTask):
         LOG.warning("Reverting mark l7policy pending update in DB "
                     "for l7policy id %s", l7policy.id)
         self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
+
+
+class MarkL7PoliciesPendingUpdateInDB(BaseDatabaseTask):
+    """Mark the l7policy pending update in the DB.
+
+    Since sqlalchemy will likely retry by itself always revert if it fails
+    """
+
+    def execute(self, l7policies):
+        """Mark the l7policy as pending update in DB.
+
+        :param l7policies: a list of L7Policy object to be updated
+        :returns: None
+        """
+
+        for l7policy in l7policies:
+            LOG.debug("Mark PENDING UPDATE in DB for l7policy id: %s",
+                      l7policy.id)
+            self.l7policy_repo.update(db_apis.get_session(),
+                                      l7policy.id,
+                                      provisioning_status=(constants.
+                                                           PENDING_UPDATE))
+
+    def revert(self, l7policies, *args, **kwargs):
+        """Mark the l7policy as broken
+
+        :param l7policies: a list of L7Policy object that failed to update
+        :returns: None
+        """
+        for l7policy in l7policies:
+            LOG.warning("Reverting mark l7policy pending update in DB "
+                        "for l7policy id %s", l7policy.id)
+            self.task_utils.mark_l7policy_prov_status_error(l7policy.id)
+
 
 
 class MarkL7RuleActiveInDB(BaseDatabaseTask):

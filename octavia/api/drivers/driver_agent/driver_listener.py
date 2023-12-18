@@ -50,11 +50,7 @@ class StatusRequestHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         # Get the update data
-        try:
-            status = _recv(self.request)
-        except Exception:
-            LOG.exception("Error while receiving data.")
-            return
+        status = _recv(self.request)
 
         # Process the update
         updater = driver_updater.DriverUpdater()
@@ -63,22 +59,15 @@ class StatusRequestHandler(socketserver.BaseRequestHandler):
         # Send the response
         json_data = jsonutils.dump_as_bytes(response)
         len_str = '{}\n'.format(len(json_data)).encode('utf-8')
-        try:
-            self.request.send(len_str)
-            self.request.sendall(json_data)
-        except Exception:
-            LOG.exception("Error while sending data.")
+        self.request.send(len_str)
+        self.request.sendall(json_data)
 
 
 class StatsRequestHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         # Get the update data
-        try:
-            stats = _recv(self.request)
-        except Exception:
-            LOG.exception("Error while receiving data.")
-            return
+        stats = _recv(self.request)
 
         # Process the update
         updater = driver_updater.DriverUpdater()
@@ -87,22 +76,15 @@ class StatsRequestHandler(socketserver.BaseRequestHandler):
         # Send the response
         json_data = jsonutils.dump_as_bytes(response)
         len_str = '{}\n'.format(len(json_data)).encode('utf-8')
-        try:
-            self.request.send(len_str)
-            self.request.sendall(json_data)
-        except Exception:
-            LOG.exception("Error while sending data.")
+        self.request.send(len_str)
+        self.request.sendall(json_data)
 
 
 class GetRequestHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
         # Get the data request
-        try:
-            get_data = _recv(self.request)
-        except Exception:
-            LOG.exception("Error while receiving data.")
-            return
+        get_data = _recv(self.request)
 
         # Process the get
         response = driver_get.process_get(get_data)
@@ -110,11 +92,8 @@ class GetRequestHandler(socketserver.BaseRequestHandler):
         # Send the response
         json_data = jsonutils.dump_as_bytes(response)
         len_str = '{}\n'.format(len(json_data)).encode('utf-8')
-        try:
-            self.request.send(len_str)
-            self.request.sendall(json_data)
-        except Exception:
-            LOG.exception("Error while sending data.")
+        self.request.send(len_str)
+        self.request.sendall(json_data)
 
 
 class ForkingUDSServer(socketserver.ForkingMixIn,
@@ -134,53 +113,59 @@ def _cleanup_socket_file(filename):
 def status_listener(exit_event):
     _cleanup_socket_file(CONF.driver_agent.status_socket_path)
 
-    with ForkingUDSServer(CONF.driver_agent.status_socket_path,
-                          StatusRequestHandler) as server:
-        server.timeout = CONF.driver_agent.status_request_timeout
-        server.max_children = CONF.driver_agent.status_max_processes
+    server = ForkingUDSServer(CONF.driver_agent.status_socket_path,
+                              StatusRequestHandler)
 
-        threading.Thread(target=server.serve_forever).start()
+    server.timeout = CONF.driver_agent.status_request_timeout
+    server.max_children = CONF.driver_agent.status_max_processes
 
-        exit_event.wait()
+    while not exit_event.is_set():
+        server.handle_request()
 
-        LOG.info('Waiting for driver status listener to shutdown...')
-        server.shutdown()
-        LOG.info('Driver status listener shutdown finished.')
+    LOG.info('Waiting for driver status listener to shutdown...')
+    # Can't shut ourselves down as we would deadlock, spawn a thread
+    threading.Thread(target=server.shutdown).start()
+    LOG.info('Driver status listener shutdown finished.')
+    server.server_close()
     _cleanup_socket_file(CONF.driver_agent.status_socket_path)
 
 
 def stats_listener(exit_event):
     _cleanup_socket_file(CONF.driver_agent.stats_socket_path)
 
-    with ForkingUDSServer(CONF.driver_agent.stats_socket_path,
-                          StatsRequestHandler) as server:
-        server.timeout = CONF.driver_agent.stats_request_timeout
-        server.max_children = CONF.driver_agent.stats_max_processes
+    server = ForkingUDSServer(CONF.driver_agent.stats_socket_path,
+                              StatsRequestHandler)
 
-        threading.Thread(target=server.serve_forever).start()
+    server.timeout = CONF.driver_agent.stats_request_timeout
+    server.max_children = CONF.driver_agent.stats_max_processes
 
-        exit_event.wait()
+    while not exit_event.is_set():
+        server.handle_request()
 
-        LOG.info('Waiting for driver statistics listener to shutdown...')
-        server.shutdown()
-        LOG.info('Driver statistics listener shutdown finished.')
+    LOG.info('Waiting for driver statistics listener to shutdown...')
+    # Can't shut ourselves down as we would deadlock, spawn a thread
+    threading.Thread(target=server.shutdown).start()
+    LOG.info('Driver statistics listener shutdown finished.')
+    server.server_close()
     _cleanup_socket_file(CONF.driver_agent.stats_socket_path)
 
 
 def get_listener(exit_event):
     _cleanup_socket_file(CONF.driver_agent.get_socket_path)
 
-    with ForkingUDSServer(CONF.driver_agent.get_socket_path,
-                          GetRequestHandler) as server:
-        server.timeout = CONF.driver_agent.get_request_timeout
-        server.max_children = CONF.driver_agent.get_max_processes
+    server = ForkingUDSServer(CONF.driver_agent.get_socket_path,
+                              GetRequestHandler)
 
-        threading.Thread(target=server.serve_forever).start()
+    server.timeout = CONF.driver_agent.get_request_timeout
+    server.max_children = CONF.driver_agent.get_max_processes
 
-        exit_event.wait()
+    while not exit_event.is_set():
+        server.handle_request()
 
-        LOG.info('Waiting for driver get listener to shutdown...')
-        server.shutdown()
-        LOG.info('Driver get listener shutdown finished.')
+    LOG.info('Waiting for driver get listener to shutdown...')
+    # Can't shut ourselves down as we would deadlock, spawn a thread
+    threading.Thread(target=server.shutdown).start()
+    LOG.info('Driver get listener shutdown finished.')
+    server.server_close()
     _cleanup_socket_file(CONF.driver_agent.get_socket_path)
     LOG.info("UDS server was closed and socket was cleaned up.")

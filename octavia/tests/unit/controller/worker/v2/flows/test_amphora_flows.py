@@ -253,6 +253,32 @@ class TestAmphoraFlows(base.TestCase):
         self.assertEqual(5, len(amp_flow.requires))
         self.conf.config(group="nova", enable_anti_affinity=False)
 
+    def test_get_cert_multi_rest_anti_affinity_create_amphora_for_lb_flow_1(
+            self, mock_get_net_driver):
+        self.conf.config(group="nova", enable_anti_affinity=True)
+
+        self.AmpFlow = amphora_flows.AmphoraFlows()
+        amp_flow = self.AmpFlow._get_create_amp_for_lb_subflow(
+            'SOMEPREFIX', constants.ROLE_MULTI)
+
+        self.assertIsInstance(amp_flow, flow.Flow)
+
+        self.assertIn(constants.FLAVOR, amp_flow.requires)
+        self.assertIn(constants.AVAILABILITY_ZONE, amp_flow.requires)
+        self.assertIn(constants.BUILD_TYPE_PRIORITY, amp_flow.requires)
+        self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
+        self.assertIn(constants.SERVER_GROUP_ID, amp_flow.requires)
+
+        self.assertIn(constants.AMPHORA_ID, amp_flow.provides)
+        self.assertIn(constants.SERVER_GROUP_ID, amp_flow.requires)
+        self.assertIn(constants.COMPUTE_ID, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_OBJ, amp_flow.provides)
+        self.assertIn(constants.SERVER_PEM, amp_flow.provides)
+
+        self.assertEqual(5, len(amp_flow.provides))
+        self.assertEqual(7, len(amp_flow.requires))
+        self.conf.config(group="nova", enable_anti_affinity=False)
+
     def test_get_delete_amphora_flow(self, mock_get_net_driver):
 
         amp_flow = self.AmpFlow.get_delete_amphora_flow(self.amp4.to_dict())
@@ -281,12 +307,44 @@ class TestAmphoraFlows(base.TestCase):
         self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
         self.assertIn(constants.VIP, amp_flow.requires)
 
-        self.assertIn(constants.UPDATED_PORTS, amp_flow.provides)
+        self.assertIn(constants.ADDED_PORTS, amp_flow.provides)
         self.assertIn(constants.AMP_VRRP_INT, amp_flow.provides)
         self.assertIn(constants.AMPHORA, amp_flow.provides)
         self.assertIn(constants.AMPHORA_ID, amp_flow.provides)
         self.assertIn(constants.AMPHORAE, amp_flow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, amp_flow.provides)
+        self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, amp_flow.provides)
+        self.assertIn(constants.BASE_PORT, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_ID, amp_flow.provides)
+        self.assertIn(constants.COMPUTE_OBJ, amp_flow.provides)
+        self.assertIn(constants.DELTA, amp_flow.provides)
+        self.assertIn(constants.LOADBALANCER, amp_flow.provides)
+        self.assertIn(constants.SERVER_PEM, amp_flow.provides)
+        self.assertIn(constants.VIP_SG_ID, amp_flow.provides)
+
+        self.assertEqual(7, len(amp_flow.requires))
+        self.assertEqual(13, len(amp_flow.provides))
+
+    def test_get_failover_flow_multi_active(self, mock_get_net_driver):
+        failed_amphora = data_models.Amphora(
+            id=uuidutils.generate_uuid(), role=constants.ROLE_MULTI,
+            load_balancer_id=uuidutils.generate_uuid()).to_dict()
+
+        amp_flow = self.AmpFlow.get_failover_amphora_flow(
+            failed_amphora, 2)
+
+        self.assertIsInstance(amp_flow, flow.Flow)
+
+        self.assertIn(constants.AVAILABILITY_ZONE, amp_flow.requires)
+        self.assertIn(constants.BUILD_TYPE_PRIORITY, amp_flow.requires)
+        self.assertIn(constants.FLAVOR, amp_flow.requires)
+        self.assertIn(constants.LOADBALANCER, amp_flow.requires)
+        self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
+        self.assertIn(constants.VIP, amp_flow.requires)
+
+        self.assertIn(constants.ADDED_PORTS, amp_flow.provides)
+        self.assertIn(constants.AMPHORA, amp_flow.provides)
+        self.assertIn(constants.AMPHORA_ID, amp_flow.provides)
+        self.assertIn(constants.AMPHORAE, amp_flow.provides)
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, amp_flow.provides)
         self.assertIn(constants.BASE_PORT, amp_flow.provides)
         self.assertIn(constants.COMPUTE_ID, amp_flow.provides)
@@ -317,11 +375,10 @@ class TestAmphoraFlows(base.TestCase):
         self.assertIn(constants.LOADBALANCER_ID, amp_flow.requires)
         self.assertIn(constants.VIP, amp_flow.requires)
 
-        self.assertIn(constants.UPDATED_PORTS, amp_flow.provides)
+        self.assertIn(constants.ADDED_PORTS, amp_flow.provides)
         self.assertIn(constants.AMPHORA, amp_flow.provides)
         self.assertIn(constants.AMPHORA_ID, amp_flow.provides)
         self.assertIn(constants.AMPHORAE, amp_flow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, amp_flow.provides)
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, amp_flow.provides)
         self.assertIn(constants.BASE_PORT, amp_flow.provides)
         self.assertIn(constants.COMPUTE_ID, amp_flow.provides)
@@ -332,7 +389,7 @@ class TestAmphoraFlows(base.TestCase):
         self.assertIn(constants.VIP_SG_ID, amp_flow.provides)
 
         self.assertEqual(7, len(amp_flow.requires))
-        self.assertEqual(13, len(amp_flow.provides))
+        self.assertEqual(12, len(amp_flow.provides))
 
     def test_get_failover_flow_bogus_role(self, mock_get_net_driver):
         failed_amphora = data_models.Amphora(id=uuidutils.generate_uuid(),
@@ -370,31 +427,12 @@ class TestAmphoraFlows(base.TestCase):
 
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, vrrp_subflow.provides)
         self.assertIn(constants.AMP_VRRP_INT, vrrp_subflow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, vrrp_subflow.provides)
 
         self.assertIn(constants.LOADBALANCER_ID, vrrp_subflow.requires)
         self.assertIn(constants.AMPHORAE, vrrp_subflow.requires)
-        self.assertIn(constants.AMPHORA_ID, vrrp_subflow.requires)
-
-        self.assertEqual(3, len(vrrp_subflow.provides))
-        self.assertEqual(3, len(vrrp_subflow.requires))
-
-    def test_get_vrrp_subflow_dont_get_status(self, mock_get_net_driver):
-        vrrp_subflow = self.AmpFlow.get_vrrp_subflow('123',
-                                                     get_amphorae_status=False)
-
-        self.assertIsInstance(vrrp_subflow, flow.Flow)
-
-        self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, vrrp_subflow.provides)
-        self.assertIn(constants.AMP_VRRP_INT, vrrp_subflow.provides)
-
-        self.assertIn(constants.LOADBALANCER_ID, vrrp_subflow.requires)
-        self.assertIn(constants.AMPHORAE, vrrp_subflow.requires)
-        self.assertIn(constants.AMPHORA_ID, vrrp_subflow.requires)
-        self.assertIn(constants.AMPHORAE_STATUS, vrrp_subflow.requires)
 
         self.assertEqual(2, len(vrrp_subflow.provides))
-        self.assertEqual(4, len(vrrp_subflow.requires))
+        self.assertEqual(2, len(vrrp_subflow.requires))
 
     def test_get_vrrp_subflow_dont_create_vrrp_group(
             self, mock_get_net_driver):
@@ -405,14 +443,12 @@ class TestAmphoraFlows(base.TestCase):
 
         self.assertIn(constants.AMPHORAE_NETWORK_CONFIG, vrrp_subflow.provides)
         self.assertIn(constants.AMP_VRRP_INT, vrrp_subflow.provides)
-        self.assertIn(constants.AMPHORAE_STATUS, vrrp_subflow.provides)
 
         self.assertIn(constants.LOADBALANCER_ID, vrrp_subflow.requires)
         self.assertIn(constants.AMPHORAE, vrrp_subflow.requires)
-        self.assertIn(constants.AMPHORA_ID, vrrp_subflow.requires)
 
-        self.assertEqual(3, len(vrrp_subflow.provides))
-        self.assertEqual(3, len(vrrp_subflow.requires))
+        self.assertEqual(2, len(vrrp_subflow.provides))
+        self.assertEqual(2, len(vrrp_subflow.requires))
 
     def test_update_amphora_config_flow(self, mock_get_net_driver):
 

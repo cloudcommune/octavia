@@ -19,6 +19,7 @@
 """Utilities and helper functions."""
 
 import base64
+import functools
 import hashlib
 import re
 import socket
@@ -141,10 +142,8 @@ def subnet_ip_availability(nw_ip_avail, subnet_id, req_num_ips):
             return subnet['total_ips'] - subnet['used_ips'] >= req_num_ips
     return None
 
-
 def b(s):
     return s.encode('utf-8')
-
 
 def expand_expected_codes(codes):
     """Expand the expected code string in set of codes.
@@ -164,6 +163,36 @@ def expand_expected_codes(codes):
         else:
             retval.add(code)
     return retval
+
+
+class DoNothing(str):
+    """Class that literrally does nothing.
+
+    We inherit from str in case it's called with json.dumps.
+    """
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __getattr__(self, name):
+        return self
+
+DO_NOTHING = DoNothing()
+
+
+def notifications_enabled(conf):
+    """Check if oslo notifications are enabled."""
+    notifications_driver = set(conf.oslo_messaging_notifications.driver)
+    return notifications_driver and notifications_driver != {'noop'}
+
+
+def if_notifications_enabled(f):
+    """Calls decorated method only if notifications are enabled."""
+    @functools.wraps(f)
+    def wrapped(*args, **kwargs):
+        if notifications_enabled(CONF):
+            return f(*args, **kwargs)
+        return DO_NOTHING
+    return wrapped
 
 
 class exception_logger(object):

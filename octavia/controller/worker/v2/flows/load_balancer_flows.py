@@ -80,6 +80,9 @@ class LoadBalancerFlows(object):
             lb_create_flow.add(*self._create_active_standby_topology())
         elif topology == constants.TOPOLOGY_SINGLE:
             lb_create_flow.add(*self._create_single_topology())
+        # multi active
+        elif topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            lb_create_flow.add(*self._create_multi_active_topology())
         else:
             LOG.error("Unknown topology: %s.  Unable to build load balancer.",
                       topology)
@@ -87,19 +90,25 @@ class LoadBalancerFlows(object):
 
         post_amp_prefix = constants.POST_LB_AMP_ASSOCIATION_SUBFLOW
         lb_create_flow.add(
-            self.get_post_lb_amp_association_flow(post_amp_prefix, topology))
+            self.get_post_lb_amp_association_flow(
+                post_amp_prefix, topology, mark_active=(not listeners)))
+
+        # add ecmp routes
+        if topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            lb_create_flow.add(self._add_ecmp_routes_flow())
 
         if listeners:
             lb_create_flow.add(*self._create_listeners_flow())
 
-        lb_create_flow.add(
-            database_tasks.MarkLBActiveInDB(
-                mark_subobjects=True,
-                requires=constants.LOADBALANCER
-            )
-        )
-
         return lb_create_flow
+
+    def _add_ecmp_routes_flow(self):
+        sf_name = constants.ADD_ECMP_ROUTES_FLOW
+        add_ecmp_routes_flow = linear_flow.Flow(sf_name)
+        add_ecmp_routes_flow.add(network_tasks.AddEcmpRoutes(
+            requires=constants.LOADBALANCER
+        ))
+        return add_ecmp_routes_flow
 
     def _create_single_topology(self):
         sf_name = (constants.ROLE_STANDALONE + '-' +
@@ -111,6 +120,52 @@ class LoadBalancerFlows(object):
         amp_for_lb_net_flow.add(amp_for_lb_flow)
         amp_for_lb_net_flow.add(*self._get_amp_net_subflow(sf_name))
         return amp_for_lb_net_flow
+
+    # multi active
+    def _create_multi_active_topology(self):
+        lf_name = constants.CREATE_MULTI_LOADBALANCER_FLOW
+        anti_affinity = CONF.nova.enable_anti_affinity
+        flows = []
+        # add health element for multiType
+        flows.append(
+            network_tasks.GetMultiHealthCheckPortId(
+                requires=constants.LOADBALANCER_ID,
+                provides=(constants.SNAT_IP, constants.DHCP_IP)
+            )
+        )
+        if anti_affinity:
+            # we need to create a server group first
+            flows.append(
+                compute_tasks.NovaServerGroupCreate(
+                    name=lf_name + '-' + constants.CREATE_SERVER_GROUP_FLOW,
+                    requires=(constants.LOADBALANCER_ID),
+                    provides=constants.SERVER_GROUP_ID))
+
+            # update server group id in lb table
+            flows.append(
+                database_tasks.UpdateLBServerGroupInDB(
+                    name=lf_name + '-' +
+                    constants.UPDATE_LB_SERVERGROUPID_FLOW,
+                    requires=(constants.LOADBALANCER_ID,
+                              constants.SERVER_GROUP_ID)))
+        amps_flow = unordered_flow.Flow(lf_name)
+        multi_active_num = CONF.controller_worker.multi_active_num
+        while multi_active_num > 0:
+            multi_sf_name = (constants.ROLE_MULTI + '-' + str(
+                multi_active_num) + constants.AMP_PLUG_NET_SUBFLOW)
+            amps_flow.add(
+                linear_flow.Flow(multi_sf_name).add(
+                    self.amp_flows.get_amphora_for_lb_subflow(
+                        prefix=constants.ROLE_MULTI + '-' + str(
+                            multi_active_num),
+                        role=constants.ROLE_MULTI))
+                .add(
+                    *self._get_amp_net_subflow(
+                        multi_sf_name,
+                        topology=constants.TOPOLOGY_MULTI_ACTIVE)))
+            LOG.info('add ' + str(multi_active_num) + ' mission to flow done')
+            multi_active_num -= 1
+        return flows + [amps_flow]
 
     def _create_active_standby_topology(
             self, lf_name=constants.CREATE_LOADBALANCER_FLOW):
@@ -158,7 +213,7 @@ class LoadBalancerFlows(object):
 
         return flows + [amps_flow]
 
-    def _get_amp_net_subflow(self, sf_name):
+    def _get_amp_net_subflow(self, sf_name, topology=None):
         flows = []
         flows.append(network_tasks.PlugVIPAmphora(
             name=sf_name + '-' + constants.PLUG_VIP_AMPHORA,
@@ -177,12 +232,22 @@ class LoadBalancerFlows(object):
             name=sf_name + '-' + constants.GET_AMP_NETWORK_CONFIG,
             requires=(constants.LOADBALANCER, constants.AMPHORA),
             provides=constants.AMPHORA_NETWORK_CONFIG))
-        flows.append(amphora_driver_tasks.AmphoraPostVIPPlug(
-            name=sf_name + '-' + constants.AMP_POST_VIP_PLUG,
-            rebind={constants.AMPHORAE_NETWORK_CONFIG:
-                    constants.AMPHORA_NETWORK_CONFIG},
-            requires=(constants.LOADBALANCER,
-                      constants.AMPHORAE_NETWORK_CONFIG)))
+
+        if topology and topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            LOG.info('_get_amp_net_subflow == AmphoraPostLoopVipPlug')
+            flows.append(amphora_driver_tasks.AmphoraPostLoopVipPlug(
+                name=sf_name + '-' + constants.AMP_POST_LOOP_VIP_PLUG,
+                rebind={constants.AMPHORAE_NETWORK_CONFIG:
+                        constants.AMPHORA_NETWORK_CONFIG},
+                requires=(constants.LOADBALANCER,
+                          constants.AMPHORAE_NETWORK_CONFIG)))
+        else:
+            flows.append(amphora_driver_tasks.AmphoraPostVIPPlug(
+                name=sf_name + '-' + constants.AMP_POST_VIP_PLUG,
+                rebind={constants.AMPHORAE_NETWORK_CONFIG:
+                        constants.AMPHORA_NETWORK_CONFIG},
+                requires=(constants.LOADBALANCER,
+                          constants.AMPHORAE_NETWORK_CONFIG)))
         return flows
 
     def _create_listeners_flow(self):
@@ -202,27 +267,27 @@ class LoadBalancerFlows(object):
         )
         flows.append(
             network_tasks.HandleNetworkDeltas(
-                requires=constants.DELTAS, provides=constants.UPDATED_PORTS
-            )
-        )
-        flows.append(
-            network_tasks.GetAmphoraeNetworkConfigs(
-                requires=constants.LOADBALANCER_ID,
-                provides=constants.AMPHORAE_NETWORK_CONFIG
+                requires=constants.DELTAS, provides=constants.ADDED_PORTS
             )
         )
         flows.append(
             amphora_driver_tasks.AmphoraePostNetworkPlug(
-                requires=(constants.LOADBALANCER, constants.UPDATED_PORTS,
-                          constants.AMPHORAE_NETWORK_CONFIG)
+                requires=(constants.LOADBALANCER, constants.ADDED_PORTS)
             )
         )
         flows.append(
             self.listener_flows.get_create_all_listeners_flow()
         )
+        flows.append(
+            database_tasks.MarkLBActiveInDB(
+                mark_subobjects=True,
+                requires=constants.LOADBALANCER
+            )
+        )
         return flows
 
-    def get_post_lb_amp_association_flow(self, prefix, topology):
+    def get_post_lb_amp_association_flow(self, prefix, topology,
+                                         mark_active=True):
         """Reload the loadbalancer and create networking subflows for
 
         created/allocated amphorae.
@@ -245,6 +310,10 @@ class LoadBalancerFlows(object):
 
         post_create_LB_flow.add(database_tasks.UpdateLoadbalancerInDB(
             requires=[constants.LOADBALANCER, constants.UPDATE_DICT]))
+        if mark_active:
+            post_create_LB_flow.add(database_tasks.MarkLBActiveInDB(
+                name=sf_name + '-' + constants.MARK_LB_ACTIVE_INDB,
+                requires=constants.LOADBALANCER))
         return post_create_LB_flow
 
     def _get_delete_listeners_flow(self, listeners):
@@ -297,6 +366,8 @@ class LoadBalancerFlows(object):
             pools_delete = self._get_delete_pools_flow(pools)
             delete_LB_flow.add(pools_delete)
             delete_LB_flow.add(listeners_delete)
+        delete_LB_flow.add(network_tasks.DelEcmpRoutes(
+            requires=constants.LOADBALANCER))
         delete_LB_flow.add(network_tasks.UnplugVIP(
             requires=constants.LOADBALANCER))
         delete_LB_flow.add(network_tasks.DeallocateVIP(
@@ -384,6 +455,8 @@ class LoadBalancerFlows(object):
             if failed_amp_role in (constants.ROLE_MASTER,
                                    constants.ROLE_BACKUP):
                 amp_role = 'master_or_backup'
+            elif failed_amp_role == constants.ROLE_MULTI:
+                amp_role = 'multi'
             elif failed_amp_role == constants.ROLE_STANDALONE:
                 amp_role = 'standalone'
             else:
@@ -423,6 +496,11 @@ class LoadBalancerFlows(object):
         if lb_topology == constants.TOPOLOGY_ACTIVE_STANDBY:
             new_amp_role = constants.ROLE_BACKUP
 
+        if lb_topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            failover_LB_flow.add(network_tasks.GetMultiHealthCheckPortId(
+                requires=constants.LOADBALANCER_ID,
+                provides=(constants.SNAT_IP, constants.DHCP_IP)))
+            new_amp_role = constants.ROLE_MULTI
         # Get a replacement amphora and plug all of the networking.
         #
         # Do this early as the compute services have been observed to be
@@ -451,9 +529,17 @@ class LoadBalancerFlows(object):
             failover_LB_flow.add(database_tasks.MarkAmphoraBackupInDB(
                 name=constants.MARK_AMP_BACKUP_INDB,
                 requires=constants.AMPHORA))
-
+        if lb_topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            failover_LB_flow.add(database_tasks.MarkAmphoraMultiInDB(
+                name=constants.ROLE_MULTI,
+                requires=constants.AMPHORA))
         # Delete the failed amp
         if failed_amp:
+            if lb_topology == constants.TOPOLOGY_MULTI_ACTIVE:
+                failover_LB_flow.add(network_tasks.DelOneEcmpRoute(
+                    name=constants.ECMP_DELETE + '0',
+                    requires=(constants.LOADBALANCER, constants.AMPHORA),
+                    inject={constants.AMPHORA: failed_amp}))
             failover_LB_flow.add(
                 self.amp_flows.get_delete_amphora_flow(failed_amp))
 
@@ -472,12 +558,85 @@ class LoadBalancerFlows(object):
             requires=(constants.LOADBALANCER, constants.AMPHORA),
             inject={constants.TIMEOUT_DICT: timeout_dict}))
 
+        if lb_topology == constants.TOPOLOGY_MULTI_ACTIVE:
+            failover_LB_flow.add(database_tasks.GetAmphoraDetails(
+                name=constants.GET_AMPHORA_FOR_ECMP_ADD + '0',
+                requires=constants.AMPHORA,
+                provides=constants.AMPHORA))
+            failover_LB_flow.add(network_tasks.AddOneEcmpRoute(
+                name=constants.ECMP_ADD + '0',
+                requires=(constants.LOADBALANCER, constants.AMPHORA)))
+            num = 1
+            while len(amps) > 0:
+                new_amp_role = constants.ROLE_MULTI
+                failed_amp = amps.pop()
+                amp_role = 'multi'
+                LOG.info("Performing failover for amphora: %s",
+                         {"id": failed_amp.get(constants.ID),
+                          "load_balancer_id": lb.get(constants.ID),
+                          "lb_network_ip": failed_amp.get(
+                              constants.LB_NETWORK_IP),
+                          "compute_id": failed_amp.get(constants.COMPUTE_ID),
+                          "role": amp_role})
+
+                failover_LB_flow.add(
+                    database_tasks.MarkAmphoraPendingDeleteInDB(
+                        name=(new_amp_role + '-' + str(num) +
+                              constants.MARK_AMPHORA_PENDING_DELETE),
+                        requires=constants.AMPHORA,
+                        inject={constants.AMPHORA: failed_amp}))
+
+                failover_LB_flow.add(database_tasks.MarkAmphoraHealthBusy(
+                    name=(new_amp_role + '-' + str(num) +
+                          constants.MARK_AMPHORA_HEALTH_BUSY),
+                    requires=constants.AMPHORA,
+                    inject={constants.AMPHORA: failed_amp}))
+                failed_vrrp_is_ipv6 = False
+                if failed_amp[constants.VRRP_IP]:
+                    failed_vrrp_is_ipv6 = utils.is_ipv6(
+                        failed_amp[constants.VRRP_IP])
+                failover_LB_flow.add(
+                    self.amp_flows.get_amphora_for_lb_failover_subflow(
+                        prefix=constants.FAILOVER_LOADBALANCER_FLOW + str(num),
+                        role=new_amp_role,
+                        failed_amp_vrrp_port_id=failed_amp
+                        [constants.VRRP_PORT_ID],
+                        is_vrrp_ipv6=failed_vrrp_is_ipv6))
+                failover_LB_flow.add(amphora_driver_tasks.AmpListenersUpdate(
+                    name=constants.AMP_LISTENER_UPDATE + str(num),
+                    requires=(constants.LOADBALANCER, constants.AMPHORA),
+                    inject={constants.TIMEOUT_DICT: timeout_dict}))
+                failover_LB_flow.add(database_tasks.MarkAmphoraMultiInDB(
+                    name=constants.MARK_AMP_MULTI_INDB + str(num),
+                    requires=constants.AMPHORA))
+                failover_LB_flow.add(database_tasks.GetAmphoraDetails(
+                    name=constants.GET_AMPHORA_FOR_ECMP_ADD + str(num),
+                    requires=constants.AMPHORA,
+                    provides=constants.AMPHORA))
+                failover_LB_flow.add(network_tasks.AddOneEcmpRoute(
+                    name=constants.ECMP_ADD + str(num),
+                    requires=(constants.LOADBALANCER, constants.AMPHORA)))
+                # Delete the failed amp
+                failover_LB_flow.add(network_tasks.DelOneEcmpRoute(
+                    name=constants.ECMP_DELETE + str(num),
+                    requires=(constants.LOADBALANCER, constants.AMPHORA),
+                    inject={constants.AMPHORA: failed_amp}))
+                failover_LB_flow.add(
+                    self.amp_flows.get_delete_amphora_flow(
+                        failed_amp))
+                failover_LB_flow.add(
+                    database_tasks.DisableAmphoraHealthMonitoring(
+                        name=(new_amp_role + '-' + str(num) +
+                              constants.DISABLE_AMP_HEALTH_MONITORING),
+                        requires=constants.AMPHORA,
+                        inject={constants.AMPHORA: failed_amp}))
+                num += 1
         # Bring up the new "backup" amphora VIP now to reduce the outage
         # on the final failover. This dropped the outage from 8-9 seconds
         # to less than one in my lab.
         # This does mean some steps have to be repeated later to reconfigure
         # for the second amphora as a peer.
-        if lb_topology == constants.TOPOLOGY_ACTIVE_STANDBY:
+        elif lb_topology == constants.TOPOLOGY_ACTIVE_STANDBY:
 
             failover_LB_flow.add(database_tasks.CreateVRRPGroupForLB(
                 name=new_amp_role + '-' + constants.CREATE_VRRP_GROUP_FOR_LB,
@@ -599,7 +758,8 @@ class LoadBalancerFlows(object):
 
         failover_LB_flow.add(delete_extra_amps_flow)
 
-        if lb_topology == constants.TOPOLOGY_ACTIVE_STANDBY:
+        if lb_topology in (constants.TOPOLOGY_ACTIVE_STANDBY,
+                           constants.TOPOLOGY_MULTI_ACTIVE):
             # Update the data stored in the flow from the database
             failover_LB_flow.add(database_tasks.ReloadLoadBalancer(
                 name=new_amp_role + '-' + constants.RELOAD_LB_AFTER_AMP_ASSOC,
@@ -610,68 +770,54 @@ class LoadBalancerFlows(object):
                 name=new_amp_role + '-' + constants.GET_AMPHORAE_FROM_LB,
                 requires=constants.LOADBALANCER_ID,
                 provides=constants.AMPHORAE))
+            if lb_topology == constants.TOPOLOGY_ACTIVE_STANDBY:
+                # Listeners update needs to be run on all amphora to update
+                # their peer configurations. So parallelize this with an
+                # unordered subflow.
+                update_amps_subflow = unordered_flow.Flow(
+                    constants.UPDATE_AMPS_SUBFLOW)
 
-            failover_LB_flow.add(
-                amphora_driver_tasks.AmphoraeGetConnectivityStatus(
-                    name=(new_amp_role + '-' +
-                          constants.AMPHORAE_GET_CONNECTIVITY_STATUS),
-                    requires=constants.AMPHORAE,
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
-                    provides=constants.AMPHORAE_STATUS))
+                # Setup parallel flows for each amp. We don't know the new amp
+                # details at flow creation time, so setup a subflow for each
+                # amp on the LB, they let the task index into a list of amps
+                # to find the amphora it should work on.
+                update_amps_subflow.add(
+                    amphora_driver_tasks.AmphoraIndexListenerUpdate(
+                        name=(constants.AMPHORA + '-0-' +
+                              constants.AMP_LISTENER_UPDATE),
+                        requires=(constants.LOADBALANCER, constants.AMPHORAE),
+                        inject={constants.AMPHORA_INDEX: 0,
+                                constants.TIMEOUT_DICT: timeout_dict}))
+                update_amps_subflow.add(
+                    amphora_driver_tasks.AmphoraIndexListenerUpdate(
+                        name=(constants.AMPHORA + '-1-' +
+                              constants.AMP_LISTENER_UPDATE),
+                        requires=(constants.LOADBALANCER, constants.AMPHORAE),
+                        inject={constants.AMPHORA_INDEX: 1,
+                                constants.TIMEOUT_DICT: timeout_dict}))
 
-            # Listeners update needs to be run on all amphora to update
-            # their peer configurations. So parallelize this with an
-            # unordered subflow.
-            update_amps_subflow = unordered_flow.Flow(
-                constants.UPDATE_AMPS_SUBFLOW)
+                failover_LB_flow.add(update_amps_subflow)
 
-            # Setup parallel flows for each amp. We don't know the new amp
-            # details at flow creation time, so setup a subflow for each
-            # amp on the LB, they let the task index into a list of amps
-            # to find the amphora it should work on.
-            update_amps_subflow.add(
-                amphora_driver_tasks.AmphoraIndexListenerUpdate(
-                    name=(constants.AMPHORA + '-0-' +
-                          constants.AMP_LISTENER_UPDATE),
-                    requires=(constants.LOADBALANCER, constants.AMPHORAE,
-                              constants.AMPHORAE_STATUS),
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
-                    inject={constants.AMPHORA_INDEX: 0,
-                            constants.TIMEOUT_DICT: timeout_dict}))
-            update_amps_subflow.add(
-                amphora_driver_tasks.AmphoraIndexListenerUpdate(
-                    name=(constants.AMPHORA + '-1-' +
-                          constants.AMP_LISTENER_UPDATE),
-                    requires=(constants.LOADBALANCER, constants.AMPHORAE,
-                              constants.AMPHORAE_STATUS),
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
-                    inject={constants.AMPHORA_INDEX: 1,
-                            constants.TIMEOUT_DICT: timeout_dict}))
+                # Configure and enable keepalived in the amphora
+                failover_LB_flow.add(self.amp_flows.get_vrrp_subflow(
+                    new_amp_role + '-' + constants.GET_VRRP_SUBFLOW,
+                    timeout_dict, create_vrrp_group=False))
 
-            failover_LB_flow.add(update_amps_subflow)
+                # #### End of standby ####
 
-            # Configure and enable keepalived in the amphora
-            failover_LB_flow.add(self.amp_flows.get_vrrp_subflow(
-                new_amp_role + '-' + constants.GET_VRRP_SUBFLOW,
-                timeout_dict, create_vrrp_group=False,
-                get_amphorae_status=False))
-
-            # #### End of standby ####
-
-            # Reload the listener. This needs to be done here because
-            # it will create the required haproxy check scripts for
-            # the VRRP deployed above.
-            # A "V" or newer amphora-agent will remove the need for this
-            # task here.
-            # TODO(johnsom) Remove this in the "X" cycle
-            failover_LB_flow.add(
-                amphora_driver_tasks.AmphoraIndexListenersReload(
-                    name=(new_amp_role + '-' +
-                          constants.AMPHORA_RELOAD_LISTENER),
-                    requires=(constants.LOADBALANCER, constants.AMPHORAE),
-                    rebind={constants.NEW_AMPHORA_ID: constants.AMPHORA_ID},
-                    inject={constants.AMPHORA_INDEX: 1,
-                            constants.TIMEOUT_DICT: timeout_dict}))
+                # Reload the listener. This needs to be done here because
+                # it will create the required haproxy check scripts for
+                # the VRRP deployed above.
+                # A "V" or newer amphora-agent will remove the need for this
+                # task here.
+                # TODO(johnsom) Remove this in the "X" cycle
+                failover_LB_flow.add(
+                    amphora_driver_tasks.AmphoraIndexListenersReload(
+                        name=(new_amp_role + '-' +
+                              constants.AMPHORA_RELOAD_LISTENER),
+                        requires=(constants.LOADBALANCER, constants.AMPHORAE),
+                        inject={constants.AMPHORA_INDEX: 1,
+                                constants.TIMEOUT_DICT: timeout_dict}))
 
         # Remove any extraneous ports
         # Note: Nova sometimes fails to delete ports attached to an instance.

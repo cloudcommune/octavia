@@ -637,6 +637,28 @@ class MarkAmphoraBackupInDB(_MarkAmphoraRoleAndPriorityInDB):
         self._revert(result, amphora[constants.ID], *args, **kwargs)
 
 
+class MarkAmphoraMultiInDB(_MarkAmphoraRoleAndPriorityInDB):
+    """Alter the amphora role to: Multi."""
+
+    def execute(self, amphora):
+        """Mark amphora as MULTI in db.
+
+        :param amphora: Amphora to update role.
+        :returns: None
+        """
+        amp_role = constants.ROLE_MULTI
+        self._execute(amphora[constants.ID], amp_role,
+                      constants.ROLE_MASTER_PRIORITY)
+
+    def revert(self, result, amphora, *args, **kwargs):
+        """Removes amphora role association.
+
+        :param amphora: Amphora to update role.
+        :returns: None
+        """
+        self._revert(result, amphora[constants.ID], *args, **kwargs)
+
+
 class MarkAmphoraStandAloneInDB(_MarkAmphoraRoleAndPriorityInDB):
     """Alter the amphora role to: Standalone."""
 
@@ -1010,8 +1032,6 @@ class MarkLBActiveInDB(BaseDatabaseTask):
                 id=loadbalancer[constants.LOADBALANCER_ID])
             for listener in db_lb.listeners:
                 self._mark_listener_status(listener, constants.ACTIVE)
-            for pool in db_lb.pools:
-                self._mark_pool_status(pool, constants.ACTIVE)
 
         LOG.info("Mark ACTIVE in DB for load balancer id: %s",
                  loadbalancer[constants.LOADBALANCER_ID])
@@ -1086,8 +1106,8 @@ class MarkLBActiveInDB(BaseDatabaseTask):
         """
 
         if self.mark_subobjects:
-            LOG.debug("Marking all listeners and pools of loadbalancer %s"
-                      " ERROR", loadbalancer[constants.LOADBALANCER_ID])
+            LOG.debug("Marking all listeners of loadbalancer %s ERROR",
+                      loadbalancer[constants.LOADBALANCER_ID])
             db_lb = self.loadbalancer_repo.get(
                 db_apis.get_session(),
                 id=loadbalancer[constants.LOADBALANCER_ID])
@@ -1097,12 +1117,6 @@ class MarkLBActiveInDB(BaseDatabaseTask):
                 except Exception:
                     LOG.warning("Error updating listener %s provisioning "
                                 "status", listener.id)
-            for pool in db_lb.pools:
-                try:
-                    self._mark_pool_status(pool, constants.ERROR)
-                except Exception:
-                    LOG.warning("Error updating POOL %s provisioning "
-                                "status", pool.id)
 
 
 class MarkLBActiveInDBByListener(BaseDatabaseTask):
@@ -1893,39 +1907,6 @@ class MarkHealthMonitorPendingUpdateInDB(BaseDatabaseTask):
                     health_mon[constants.HEALTHMONITOR_ID])
         self.task_utils.mark_health_mon_prov_status_error(
             health_mon[constants.HEALTHMONITOR_ID])
-
-
-class MarkHealthMonitorsOnlineInDB(BaseDatabaseTask):
-    """Mark all enabled health monitors Online
-
-    :param loadbalancer: Dictionary of a Load Balancer that has associated
-           health monitors
-    :returns: None
-    """
-
-    def execute(self, loadbalancer: dict):
-        db_lb = self.loadbalancer_repo.get(
-            db_apis.get_session(),
-            id=loadbalancer[constants.LOADBALANCER_ID])
-
-        # Update the healthmonitors of either attached listeners or l7policies
-        hms_to_update = []
-
-        for listener in db_lb.listeners:
-            if listener.default_pool and listener.default_pool.health_monitor:
-                hm = listener.default_pool.health_monitor
-                if hm.enabled:
-                    hms_to_update.append(hm.id)
-            for l7policy in listener.l7policies:
-                if l7policy.redirect_pool and (
-                        l7policy.redirect_pool.health_monitor):
-                    hm = l7policy.redirect_pool.health_monitor
-                    if hm.enabled:
-                        hms_to_update.append(hm.id)
-
-        for hm_id in hms_to_update:
-            self.health_mon_repo.update(db_apis.get_session(), hm_id,
-                                        operating_status=constants.ONLINE)
 
 
 class MarkL7PolicyActiveInDB(BaseDatabaseTask):
